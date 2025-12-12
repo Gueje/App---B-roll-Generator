@@ -1,0 +1,5 @@
+{
+  "name": "B-Roll Generator",
+  "description": "A full-stack capable application that transforms Word scripts into comprehensive B-Roll plans using Google Gemini, extracting scenes, inferring visual styles, and exporting actionable plans to Google Docs.",
+  "requestFramePermissions": []
+}
