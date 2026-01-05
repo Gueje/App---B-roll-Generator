@@ -83,7 +83,8 @@ function App() {
     setError(null);
 
     try {
-      const results = await generateBrollPlan(segments);
+      // Pass the key from state to the service
+      const results = await generateBrollPlan(segments, config.geminiKey);
       setSuggestions(results);
       
       // Save to History

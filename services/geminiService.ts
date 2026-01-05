@@ -29,9 +29,11 @@ For each script segment:
 `;
 
 export const generateBrollPlan = async (
-  segments: ScriptSegment[]
+  segments: ScriptSegment[],
+  apiKey: string
 ): Promise<BrollSuggestion[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Use the key provided from the UI configuration
+  const ai = new GoogleGenAI({ apiKey: apiKey });
 
   // Processing payload
   const segmentsPayload = segments.map(s => ({
