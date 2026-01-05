@@ -177,6 +177,13 @@ function App() {
         {/* Main Content */}
         <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
             
+            {/* Description Paragraph */}
+            <div className="mb-8 text-center max-w-3xl mx-auto bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100">
+                <p className="text-slate-700 text-lg leading-relaxed font-medium">
+                    Convierte tus guiones en planes visuales al instante. Sube tu archivo Word (.docx) y obtén sugerencias detalladas de imágenes y videos (B-Roll) que encajen perfectamente con tu historia, manteniendo un estilo visual único y coherente.
+                </p>
+            </div>
+
             {/* Error Banner */}
             {error && (
             <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3 animate-fade-in">
@@ -187,13 +194,13 @@ function App() {
 
             {/* Empty State / Upload */}
             {segments.length === 0 && (
-            <div className="mt-12 text-center p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
+            <div className="mt-4 text-center p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Upload className="w-8 h-8" />
                 </div>
-                <h2 className="text-2xl font-bold text-slate-800 mb-2">Upload your Script</h2>
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Sube tu Guion</h2>
                 <p className="text-slate-500 mb-8 max-w-md mx-auto">
-                Select a .docx file. We'll extract text, links, and notes, then generate rigorous visual suggestions.
+                Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
                 </p>
                 <input
                 type="file"
@@ -207,7 +214,7 @@ function App() {
                 className="px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-1"
                 disabled={status === 'PARSING'}
                 >
-                {status === 'PARSING' ? <Loader2 className="w-5 h-5 animate-spin" /> : "Select Document"}
+                {status === 'PARSING' ? <Loader2 className="w-5 h-5 animate-spin" /> : "Seleccionar Documento"}
                 </button>
             </div>
             )}
