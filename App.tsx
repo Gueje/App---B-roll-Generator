@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -26,6 +26,8 @@ function App() {
   const [history, setHistory] = useState<HistorySession[]>([]);
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // Mobile Menu State
+
   const [segments, setSegments] = useState<ScriptSegment[]>([]);
   const [suggestions, setSuggestions] = useState<BrollSuggestion[]>([]);
   const [currentFileName, setCurrentFileName] = useState<string>('');
@@ -118,6 +120,7 @@ function App() {
       setSuggestions(session.suggestions);
       setCurrentFileName(session.scriptName);
       setError(null);
+      setIsMobileMenuOpen(false); // Close menu on selection
   };
 
   const handleNewProject = () => {
@@ -129,40 +132,56 @@ function App() {
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
     }
+    setIsMobileMenuOpen(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar */}
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {/* Sidebar - Responsive */}
       <Sidebar 
         user={LOCAL_USER} 
         history={history} 
         onSelectSession={handleSelectHistory}
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
       />
 
-      <div className="flex-1 flex flex-col ml-64 transition-all">
+      {/* Main Container */}
+      {/* md:ml-64 ensures space for sidebar on desktop, ml-0 on mobile */}
+      <div className="flex-1 flex flex-col md:ml-64 transition-all w-full">
+        
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-            <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+            <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex justify-between items-center">
+            
             <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-indigo-200">
-                <PlayCircle className="w-6 h-6" />
+                {/* Mobile Menu Button */}
+                <button 
+                    onClick={() => setIsMobileMenuOpen(true)}
+                    className="md:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                    <Menu className="w-6 h-6" />
+                </button>
+
+                <div className="w-9 h-9 md:w-10 md:h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-indigo-200 shrink-0">
+                    <PlayCircle className="w-5 h-5 md:w-6 md:h-6" />
                 </div>
-                <div>
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight">B-Roll Generator</h1>
-                <p className="text-xs text-slate-500 font-medium">
-                    {currentFileName ? `Project: ${currentFileName}` : "New Project"}
-                </p>
+                <div className="overflow-hidden">
+                    <h1 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight truncate">B-Roll Gen</h1>
+                    <p className="text-[10px] md:text-xs text-slate-500 font-medium truncate max-w-[150px] md:max-w-none">
+                        {currentFileName ? currentFileName : "New Project"}
+                    </p>
                 </div>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 md:gap-3">
                 <button
                     onClick={handleNewProject}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
+                    className="flex items-center gap-2 px-3 py-2 md:px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-xs md:text-sm font-medium shadow-sm"
                 >
                     <Plus className="w-4 h-4" />
-                    New Project
+                    <span className="hidden md:inline">New Project</span>
+                    <span className="md:hidden">New</span>
                 </button>
                 <button
                     onClick={() => setIsSettingsOpen(true)}
@@ -175,19 +194,21 @@ function App() {
             </div>
         </header>
 
-        {/* Main Content */}
-        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
+        {/* Main Content Area */}
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 md:px-6 py-6 md:py-8">
             
             {/* Description Paragraph */}
-            <div className="mb-8 text-center max-w-3xl mx-auto bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100">
-                <p className="text-slate-700 text-lg leading-relaxed font-medium">
-                    Convierte tus guiones en planes visuales al instante. Sube tu archivo Word (.docx) y obtén sugerencias detalladas de imágenes y videos (B-Roll) que encajen perfectamente con tu historia, manteniendo un estilo visual único y coherente.
-                </p>
-            </div>
+            {segments.length === 0 && (
+                <div className="mb-8 text-center max-w-3xl mx-auto bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100">
+                    <p className="text-slate-700 text-base md:text-lg leading-relaxed font-medium">
+                        Convierte tus guiones en planes visuales al instante. Sube tu archivo Word (.docx) y obtén sugerencias detalladas de imágenes y videos (B-Roll) que encajen perfectamente con tu historia.
+                    </p>
+                </div>
+            )}
 
             {/* Error Banner */}
             {error && (
-            <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3 animate-fade-in">
+            <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3 animate-fade-in text-sm md:text-base">
                 <AlertCircle className="w-5 h-5 shrink-0" />
                 {error}
             </div>
@@ -195,71 +216,71 @@ function App() {
 
             {/* Empty State / Upload */}
             {segments.length === 0 && (
-            <div className="mt-4 text-center p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
-                <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Upload className="w-8 h-8" />
+            <div className="mt-4 text-center p-8 md:p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
+                <div className="w-14 h-14 md:w-16 md:h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Upload className="w-7 h-7 md:w-8 md:h-8" />
                 </div>
-                <h2 className="text-2xl font-bold text-slate-800 mb-2">Sube tu Guion</h2>
-                <p className="text-slate-500 mb-8 max-w-md mx-auto">
-                Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
+                <h2 className="text-xl md:text-2xl font-bold text-slate-800 mb-2">Sube tu Guion</h2>
+                <p className="text-slate-500 mb-6 md:mb-8 max-w-md mx-auto text-sm md:text-base">
+                    Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
                 </p>
                 <input
-                type="file"
-                accept=".docx"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
+                    type="file"
+                    accept=".docx"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
                 />
                 <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-1"
-                disabled={status === 'PARSING'}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-1 active:scale-95"
+                    disabled={status === 'PARSING'}
                 >
-                {status === 'PARSING' ? <Loader2 className="w-5 h-5 animate-spin" /> : "Seleccionar Documento"}
+                    {status === 'PARSING' ? <div className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Parsing...</div> : "Seleccionar Documento"}
                 </button>
             </div>
             )}
 
             {/* Dashboard */}
             {segments.length > 0 && (
-            <div className="space-y-8">
+            <div className="space-y-6 md:space-y-8">
                 {/* Toolbar */}
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center gap-2 text-slate-600">
-                    <FileText className="w-5 h-5" />
-                    <span className="font-semibold">{segments.length} script segments found</span>
-                </div>
-                
-                <div className="flex gap-3">
-                    <button
-                    onClick={handleGenerate}
-                    disabled={status !== 'IDLE' || suggestions.length > 0}
-                    className={`px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-colors ${
-                        suggestions.length > 0 
-                        ? 'bg-emerald-100 text-emerald-700 cursor-default' 
-                        : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100'
-                    }`}
-                    >
-                    {status === 'GENERATING' ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</>
-                    ) : suggestions.length > 0 ? (
-                        "Visuals Generated"
-                    ) : (
-                        "Generate Visuals"
-                    )}
-                    </button>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 sticky top-20 z-20">
+                    <div className="flex items-center gap-2 text-slate-600 text-sm md:text-base">
+                        <FileText className="w-4 h-4 md:w-5 md:h-5" />
+                        <span className="font-semibold">{segments.length} script segments</span>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                        <button
+                        onClick={handleGenerate}
+                        disabled={status !== 'IDLE' || suggestions.length > 0}
+                        className={`w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium flex justify-center items-center gap-2 transition-colors text-sm md:text-base ${
+                            suggestions.length > 0 
+                            ? 'bg-emerald-100 text-emerald-700 cursor-default' 
+                            : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100'
+                        }`}
+                        >
+                        {status === 'GENERATING' ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</>
+                        ) : suggestions.length > 0 ? (
+                            "Visuals Generated"
+                        ) : (
+                            "Generate Visuals"
+                        )}
+                        </button>
 
-                    {suggestions.length > 0 && (
-                    <button
-                        onClick={handleDownload}
-                        disabled={status === 'EXPORTING'}
-                        className="px-6 py-2.5 rounded-lg font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                    >
-                        {status === 'EXPORTING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                        Download (.md)
-                    </button>
-                    )}
-                </div>
+                        {suggestions.length > 0 && (
+                        <button
+                            onClick={handleDownload}
+                            disabled={status === 'EXPORTING'}
+                            className="w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 flex justify-center items-center gap-2 text-sm md:text-base"
+                        >
+                            {status === 'EXPORTING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            Download (.md)
+                        </button>
+                        )}
+                    </div>
                 </div>
 
                 <ScriptViewer segments={segments} suggestions={suggestions} />
