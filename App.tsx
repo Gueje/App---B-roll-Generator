@@ -3,6 +3,7 @@ import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle,
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
+import HowToGuide from './components/HowToGuide'; // Imported new component
 import { parseDocx } from './services/docxService';
 import { generateBrollPlan } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
@@ -197,7 +198,7 @@ function App() {
         {/* Main Content Area */}
         <main className="flex-1 max-w-6xl w-full mx-auto px-4 md:px-6 py-6 md:py-8">
             
-            {/* Description Paragraph */}
+            {/* Description Paragraph (Only visible on empty state) */}
             {segments.length === 0 && (
                 <div className="mb-8 text-center max-w-3xl mx-auto bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100">
                     <p className="text-slate-700 text-base md:text-lg leading-relaxed font-medium">
@@ -216,29 +217,34 @@ function App() {
 
             {/* Empty State / Upload */}
             {segments.length === 0 && (
-            <div className="mt-4 text-center p-8 md:p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
-                <div className="w-14 h-14 md:w-16 md:h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Upload className="w-7 h-7 md:w-8 md:h-8" />
+            <>
+                <div className="mt-4 text-center p-8 md:p-12 border-2 border-dashed border-slate-300 rounded-2xl bg-white hover:bg-slate-50 transition-colors">
+                    <div className="w-14 h-14 md:w-16 md:h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Upload className="w-7 h-7 md:w-8 md:h-8" />
+                    </div>
+                    <h2 className="text-xl md:text-2xl font-bold text-slate-800 mb-2">Sube tu Guion</h2>
+                    <p className="text-slate-500 mb-6 md:mb-8 max-w-md mx-auto text-sm md:text-base">
+                        Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
+                    </p>
+                    <input
+                        type="file"
+                        accept=".docx"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-1 active:scale-95"
+                        disabled={status === 'PARSING'}
+                    >
+                        {status === 'PARSING' ? <div className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Parsing...</div> : "Seleccionar Documento"}
+                    </button>
                 </div>
-                <h2 className="text-xl md:text-2xl font-bold text-slate-800 mb-2">Sube tu Guion</h2>
-                <p className="text-slate-500 mb-6 md:mb-8 max-w-md mx-auto text-sm md:text-base">
-                    Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
-                </p>
-                <input
-                    type="file"
-                    accept=".docx"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    className="hidden"
-                />
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 transition-all transform hover:-translate-y-1 active:scale-95"
-                    disabled={status === 'PARSING'}
-                >
-                    {status === 'PARSING' ? <div className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Parsing...</div> : "Seleccionar Documento"}
-                </button>
-            </div>
+                
+                {/* How to Guide (Rendered below upload box) */}
+                <HowToGuide />
+            </>
             )}
 
             {/* Dashboard */}
