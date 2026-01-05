@@ -3,10 +3,16 @@ export enum MediaType {
   IMAGE = 'IMAGE',
 }
 
+export interface ExtractedLink {
+  url: string;
+  type: 'YOUTUBE' | 'IMAGE' | 'GENERIC';
+}
+
 export interface ScriptSegment {
   id: string;
   originalText: string;
   notes: string[]; // Detected brackets or comments
+  extractedLinks: ExtractedLink[]; // New field for URLs found in text
   order: number;
 }
 
@@ -42,12 +48,24 @@ export interface AnalysisResult {
 
 export interface AppConfig {
   geminiKey: string;
-  googleClientId: string;
-  googleApiKey: string;
 }
 
 export interface ExportStats {
   totalSegments: number;
   coveredSegments: number;
   coveragePercent: number;
+}
+
+export interface UserProfile {
+  email: string;
+  name: string;
+  picture: string;
+}
+
+export interface HistorySession {
+  id: string;
+  date: string; // ISO string
+  scriptName: string;
+  segments: ScriptSegment[];
+  suggestions: BrollSuggestion[];
 }

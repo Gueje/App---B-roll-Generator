@@ -4,18 +4,28 @@ import { ScriptSegment, BrollSuggestion, MediaType } from "../types";
 const MODEL_NAME = "gemini-2.5-flash";
 
 const SYSTEM_INSTRUCTION = `
-You are an expert Video Editor and Creative Director. Your task is to analyze script segments and generate detailed B-Roll (supplementary footage) suggestions.
+You are a meticulous Video Editor and Creative Director. Your goal is to map a script to highly specific, relevant B-Roll.
 
-For each script segment provided:
-1. Analyze the context, tone, and any embedded notes (instructions in brackets).
-2. Suggest the BEST visual accompaniment (Video or Image).
-3. Create a specific, optimized search query for stock footage sites.
-4. Generate 3-8 relevant keywords.
-5. Create alternative search variants (different angles, synonyms).
-6. Define the visual style (Cinematic, Vlog, Corporate, etc.).
-7. If the scene is abstract or hard to film, suggest a Generative AI prompt.
+PHASE 1: ANALYZE GLOBAL ATMOSPHERE & STYLE
+Before generating suggestions, analyze the input segments to define a single, cohesive "Master Aesthetic" for this specific project.
+- Determine the Mood (e.g., Dark/Gritty, Bright/Corporate, Minimalist/Clean, Cyberpunk/Neon).
+- Determine the Visual Language (e.g., "Shot on 35mm film, grainy texture", "Hyper-realistic 8k, sharp focus", "Pastel color palette, soft lighting").
 
-Return PURE JSON.
+PHASE 2: GENERATE PROMPTS (Strict Rules)
+1. **UNIFIED AESTHETIC:** Every single 'aiPrompt' you generate MUST include the "Master Aesthetic" description at the end. All images must look like they belong to the exact same movie or brand identity.
+2. **ENTITY SPECIFICITY:**
+   - If the script mentions a specific person (e.g., "Steve Jobs"), the prompt MUST name them.
+   - If the script mentions a specific location (e.g., "The Louvre"), the prompt MUST name it.
+   - If the script implies a specific object (e.g., "Ferrari F40"), do not say "red sports car".
+3. **AI PROMPT STRUCTURE:**
+   The 'aiPrompt' field string MUST be constructed exactly like this:
+   "[Subject/Person defined in text] doing [Action defined in text] at [Location], [Camera Angle/Composition], [Master Aesthetic Description]"
+
+For each script segment:
+1. Identify specific nouns and entities.
+2. Generate a Main Search Query for stock sites (Rigorous, Specific).
+3. Generate an 'aiPrompt' following the structure defined above (Coherent, Stylized).
+4. Return PURE JSON.
 `;
 
 export const generateBrollPlan = async (
@@ -23,9 +33,7 @@ export const generateBrollPlan = async (
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // We process in batches to avoid huge payloads, but for this demo, we'll try a reasonable chunk.
-  // In production: Queue system.
-  
+  // Processing payload
   const segmentsPayload = segments.map(s => ({
     id: s.id,
     text: s.originalText,
@@ -33,7 +41,9 @@ export const generateBrollPlan = async (
   }));
 
   const prompt = `
-    Analyze the following script segments and generate B-roll suggestions.
+    Analyze the following script segments as a SINGLE COHESIVE VIDEO PROJECT. 
+    First, determine the visual style that fits the narrative atmosphere. 
+    Then, generate B-roll suggestions ensuring every AI prompt shares that exact same aesthetic style.
     
     Input Segments:
     ${JSON.stringify(segmentsPayload)}
@@ -52,12 +62,12 @@ export const generateBrollPlan = async (
             type: Type.OBJECT,
             properties: {
               segmentId: { type: Type.STRING },
-              visualIntent: { type: Type.STRING, description: "Description of what is happening on screen" },
+              visualIntent: { type: Type.STRING, description: "Detailed description of the shot" },
               mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
               searchQuery: {
                 type: Type.OBJECT,
                 properties: {
-                  mainQuery: { type: Type.STRING },
+                  mainQuery: { type: Type.STRING, description: "The most specific search term possible" },
                   variants: { type: Type.ARRAY, items: { type: Type.STRING } },
                   keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                 },
@@ -72,7 +82,7 @@ export const generateBrollPlan = async (
                 },
                 required: ["mood", "style"]
               },
-              aiPrompt: { type: Type.STRING, description: "Prompt for image generation models if needed" }
+              aiPrompt: { type: Type.STRING, description: "Highly detailed, consistent generative AI prompt" }
             },
             required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
           }
@@ -85,7 +95,7 @@ export const generateBrollPlan = async (
       throw new Error("No response from Gemini");
     }
 
-    // Clean up markdown if present (e.g. ```json ... ```)
+    // Clean up markdown
     jsonString = jsonString.trim();
     if (jsonString.startsWith("```json")) {
         jsonString = jsonString.replace(/^```json/, "").replace(/```$/, "");
@@ -101,9 +111,7 @@ export const generateBrollPlan = async (
         throw new Error("Received malformed JSON from API");
     }
     
-    // Post-process to add generated URLs with defensive checking
     return rawData.map((item: any) => {
-      // Ensure searchQuery exists and has a mainQuery
       const searchQuery = item.searchQuery || {};
       const mainQuery = searchQuery.mainQuery || item.visualIntent || "stock footage";
       const queryEncoded = encodeURIComponent(mainQuery);

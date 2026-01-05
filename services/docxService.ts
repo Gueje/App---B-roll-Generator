@@ -1,24 +1,21 @@
 import mammoth from 'mammoth';
-import { ScriptSegment } from '../types';
+import { ScriptSegment, ExtractedLink } from '../types';
 
 /**
  * Parses a .docx file buffer into structured script segments.
- * In a real-world scenario, this might be handled server-side for better performance with large files,
- * but mammoth.js works well in the browser for this use case.
  */
 export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment[]> => {
   try {
     const result = await mammoth.extractRawText({ arrayBuffer });
     const text = result.value;
     
-    // Simple heuristic segmentation: Split by double newlines to find paragraphs.
-    // In a production app, we would use XML parsing to find comments and footnotes specifically.
-    // Here we simulate note extraction by looking for text inside [brackets] or {braces}.
-    
     const rawSegments = text.split(/\n\s*\n/);
     const segments: ScriptSegment[] = [];
     
     let orderCounter = 0;
+
+    // Regex for URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
 
     rawSegments.forEach((raw) => {
       const trimmed = raw.trim();
@@ -32,7 +29,24 @@ export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment
           if (match[2]) notes.push(match[2]);
         }
 
+        // Extract Links
+        const extractedLinks: ExtractedLink[] = [];
+        let linkMatch;
+        while ((linkMatch = urlRegex.exec(trimmed)) !== null) {
+          const url = linkMatch[0].replace(/[)]$/, ''); // Remove trailing parenthesis if caught
+          let type: 'YOUTUBE' | 'IMAGE' | 'GENERIC' = 'GENERIC';
+          
+          if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            type = 'YOUTUBE';
+          } else if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.includes('imgur') || url.includes('drive.google.com')) {
+            type = 'IMAGE';
+          }
+          
+          extractedLinks.push({ url, type });
+        }
+
         // Clean text by removing notes for the main visual script
+        // We generally leave links in the text for context, but removing notes helps AI focus.
         const cleanText = trimmed.replace(noteRegex, '').trim();
 
         if (cleanText.length > 0 || notes.length > 0) {
@@ -40,6 +54,7 @@ export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment
             id: `seg-${orderCounter}-${Date.now()}`,
             originalText: cleanText || "[Visual Note Only]",
             notes: notes,
+            extractedLinks: extractedLinks,
             order: orderCounter++
           });
         }

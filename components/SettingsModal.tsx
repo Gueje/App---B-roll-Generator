@@ -48,29 +48,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, config, onSave }) => 
             />
             <p className="text-xs text-slate-500 mt-1">Required for analyzing scripts.</p>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Google Client ID (OAuth)</label>
-            <input
-              type="text"
-              className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={localConfig.googleClientId}
-              onChange={(e) => setLocalConfig({ ...localConfig, googleClientId: e.target.value })}
-              placeholder="1234...apps.googleusercontent.com"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Google API Key (Docs)</label>
-            <input
-              type="password"
-              className="w-full border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={localConfig.googleApiKey}
-              onChange={(e) => setLocalConfig({ ...localConfig, googleApiKey: e.target.value })}
-              placeholder="AIzaSy..."
-            />
-            <p className="text-xs text-slate-500 mt-1">Required for exporting to Google Docs.</p>
-          </div>
         </div>
 
         <div className="mt-8 flex justify-end gap-3">
@@ -85,7 +62,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, config, onSave }) => 
             className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 font-medium"
           >
             <ShieldCheck className="w-4 h-4" />
-            Save & Secure
+            Save & Close
           </button>
         </div>
       </div>
