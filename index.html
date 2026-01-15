@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>B-Roll Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+      }
+    </script>
     <style>
       /* Custom scrollbar for better aesthetics */
       ::-webkit-scrollbar {
@@ -13,6 +18,9 @@
       }
       ::-webkit-scrollbar-track {
         background: #f1f1f1;
+      }
+      .dark ::-webkit-scrollbar-track {
+        background: #1e293b;
       }
       ::-webkit-scrollbar-thumb {
         background: #888;

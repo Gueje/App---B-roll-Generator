@@ -9,7 +9,17 @@ export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment
     const result = await mammoth.extractRawText({ arrayBuffer });
     const text = result.value;
     
-    const rawSegments = text.split(/\n\s*\n/);
+    // Split logic: 
+    // 1. Look for newlines (standard paragraphs) OR
+    // 2. Look for sentence terminators (. ? !) followed by whitespace and a capital letter (start of new idea)
+    // This regex creates a split on:
+    // - Double newlines
+    // - Single newlines
+    // - Period/Question/Exclamation + Space + Lookahead for Uppercase or Start of sentence
+    
+    const splitRegex = /(?:\r?\n)+|(?<=[.!?])\s+(?=[A-Z¿¡])/;
+    
+    const rawSegments = text.split(splitRegex);
     const segments: ScriptSegment[] = [];
     
     let orderCounter = 0;
@@ -19,7 +29,8 @@ export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment
 
     rawSegments.forEach((raw) => {
       const trimmed = raw.trim();
-      if (trimmed.length > 0) {
+      // Only keep segments that have actual content (more than just a symbol)
+      if (trimmed.length > 2) {
         // Extract notes (text in brackets)
         const noteRegex = /\[(.*?)\]|\{(.*?)\}/g;
         const notes: string[] = [];
@@ -46,7 +57,6 @@ export const parseDocx = async (arrayBuffer: ArrayBuffer): Promise<ScriptSegment
         }
 
         // Clean text by removing notes for the main visual script
-        // We generally leave links in the text for context, but removing notes helps AI focus.
         const cleanText = trimmed.replace(noteRegex, '').trim();
 
         if (cleanText.length > 0 || notes.length > 0) {

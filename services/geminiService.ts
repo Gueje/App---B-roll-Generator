@@ -12,29 +12,34 @@ export const generateBrollPlan = async (
   const ai = new GoogleGenAI({ apiKey: apiKey });
 
   const SYSTEM_INSTRUCTION = `
-    You are a meticulous Video Editor and Creative Director. Your goal is to map a script to highly specific, relevant B-Roll.
-    
-    **USER PREFERENCES:**
+    You are an Expert Cinematographer and AI Prompt Engineer (Midjourney/Runway/Sora expert). 
+    Your goal is to map a script to specific B-Roll suggestions.
+
+    **USER CONFIGURATION:**
     - **Visual Style:** ${userStyle}
     - **Narrative Tone:** ${userTone}
 
-    PHASE 1: ANALYZE GLOBAL ATMOSPHERE
-    Adapt all suggestions to match the user's requested Visual Style ("${userStyle}") and Tone ("${userTone}").
-    If the style is "Sci-Fi", everything should look futuristic. If "Realistic", avoid CGI looks.
+    **CRITICAL RULE FOR VIDEO PROMPTS:**
+    If you choose 'VIDEO' as the media type, the 'aiPrompt' MUST be extremely detailed and technical. It is not enough to say "A man walking".
+    You MUST describe:
+    1. **Camera Movement:** (e.g., Slow dolly in, Truck left, Orbit, Static tripod, Handheld shake, Low angle tracking shot).
+    2. **Framing:** (e.g., Extreme Close-Up of eyes, Wide shot, Over-the-shoulder).
+    3. **Lighting:** (e.g., Volumetric lighting, Golden hour, Neon rim light, Soft diffused window light, High contrast noir).
+    4. **Action/Transition:** Specific movement within the frame (e.g., "Smoke swirls slowly", "Character turns head to camera", "Fast blur transition").
+    5. **Technical Specs:** (e.g., 4k, 60fps, shallow depth of field, bokeh, highly detailed, photorealistic).
 
-    PHASE 2: GENERATE PROMPTS (Strict Rules)
-    1. **UNIFIED AESTHETIC:** Every 'aiPrompt' MUST include the phrase: "Style: ${userStyle}".
-    2. **ENTITY SPECIFICITY:**
-       - If the script mentions a specific person/place, name it.
-       - If implied, describe it vividly.
-    3. **AI PROMPT STRUCTURE:**
-       "[Subject] doing [Action] at [Location], [Camera Angle], Style: ${userStyle}, Mood: ${userTone}"
+    **CRITICAL RULE FOR SEGMENTATION:**
+    The input segments are split by ideas/sentences. You must provide a visual for EVERY segment provided.
 
+    **OUTPUT STRUCTURE (JSON):**
     For each segment:
-    1. Identify specific nouns.
-    2. Generate a Main Search Query for stock sites.
-    3. Generate an 'aiPrompt' following the structure above.
-    4. Return PURE JSON.
+    1. **Visual Intent:** A human-readable summary of the shot.
+    2. **Media Type:** Choose VIDEO for action/emotion, IMAGE for specific objects/concepts.
+    3. **Search Query:** A simplified keyword string for stock sites (Pexels/Unsplash).
+    4. **AI Prompt:** The highly technical prompt described above.
+
+    **AI PROMPT TEMPLATE (Use this pattern):**
+    "[Subject] [Action] in [Environment]. [Camera Movement], [Framing], [Lighting]. Technical: [Specs]. Style: ${userStyle}, Mood: ${userTone}."
   `;
 
   // Processing payload
@@ -85,7 +90,7 @@ export const generateBrollPlan = async (
                 },
                 required: ["mood", "style"]
               },
-              aiPrompt: { type: Type.STRING, description: "Highly detailed, consistent generative AI prompt" }
+              aiPrompt: { type: Type.STRING, description: "Highly detailed, cinematic prompt with camera, lighting, and movement specs." }
             },
             required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
           }
