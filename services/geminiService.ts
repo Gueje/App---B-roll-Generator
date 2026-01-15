@@ -3,37 +3,39 @@ import { ScriptSegment, BrollSuggestion, MediaType } from "../types";
 
 const MODEL_NAME = "gemini-2.5-flash";
 
-const SYSTEM_INSTRUCTION = `
-You are a meticulous Video Editor and Creative Director. Your goal is to map a script to highly specific, relevant B-Roll.
-
-PHASE 1: ANALYZE GLOBAL ATMOSPHERE & STYLE
-Before generating suggestions, analyze the input segments to define a single, cohesive "Master Aesthetic" for this specific project.
-- Determine the Mood (e.g., Dark/Gritty, Bright/Corporate, Minimalist/Clean, Cyberpunk/Neon).
-- Determine the Visual Language (e.g., "Shot on 35mm film, grainy texture", "Hyper-realistic 8k, sharp focus", "Pastel color palette, soft lighting").
-
-PHASE 2: GENERATE PROMPTS (Strict Rules)
-1. **UNIFIED AESTHETIC:** Every single 'aiPrompt' you generate MUST include the "Master Aesthetic" description at the end. All images must look like they belong to the exact same movie or brand identity.
-2. **ENTITY SPECIFICITY:**
-   - If the script mentions a specific person (e.g., "Steve Jobs"), the prompt MUST name them.
-   - If the script mentions a specific location (e.g., "The Louvre"), the prompt MUST name it.
-   - If the script implies a specific object (e.g., "Ferrari F40"), do not say "red sports car".
-3. **AI PROMPT STRUCTURE:**
-   The 'aiPrompt' field string MUST be constructed exactly like this:
-   "[Subject/Person defined in text] doing [Action defined in text] at [Location], [Camera Angle/Composition], [Master Aesthetic Description]"
-
-For each script segment:
-1. Identify specific nouns and entities.
-2. Generate a Main Search Query for stock sites (Rigorous, Specific).
-3. Generate an 'aiPrompt' following the structure defined above (Coherent, Stylized).
-4. Return PURE JSON.
-`;
-
 export const generateBrollPlan = async (
   segments: ScriptSegment[],
-  apiKey: string
+  apiKey: string,
+  userStyle: string = "Cinematic & High Quality",
+  userTone: string = "Neutral"
 ): Promise<BrollSuggestion[]> => {
-  // Use the key provided from the UI configuration
   const ai = new GoogleGenAI({ apiKey: apiKey });
+
+  const SYSTEM_INSTRUCTION = `
+    You are a meticulous Video Editor and Creative Director. Your goal is to map a script to highly specific, relevant B-Roll.
+    
+    **USER PREFERENCES:**
+    - **Visual Style:** ${userStyle}
+    - **Narrative Tone:** ${userTone}
+
+    PHASE 1: ANALYZE GLOBAL ATMOSPHERE
+    Adapt all suggestions to match the user's requested Visual Style ("${userStyle}") and Tone ("${userTone}").
+    If the style is "Sci-Fi", everything should look futuristic. If "Realistic", avoid CGI looks.
+
+    PHASE 2: GENERATE PROMPTS (Strict Rules)
+    1. **UNIFIED AESTHETIC:** Every 'aiPrompt' MUST include the phrase: "Style: ${userStyle}".
+    2. **ENTITY SPECIFICITY:**
+       - If the script mentions a specific person/place, name it.
+       - If implied, describe it vividly.
+    3. **AI PROMPT STRUCTURE:**
+       "[Subject] doing [Action] at [Location], [Camera Angle], Style: ${userStyle}, Mood: ${userTone}"
+
+    For each segment:
+    1. Identify specific nouns.
+    2. Generate a Main Search Query for stock sites.
+    3. Generate an 'aiPrompt' following the structure above.
+    4. Return PURE JSON.
+  `;
 
   // Processing payload
   const segmentsPayload = segments.map(s => ({
@@ -43,9 +45,8 @@ export const generateBrollPlan = async (
   }));
 
   const prompt = `
-    Analyze the following script segments as a SINGLE COHESIVE VIDEO PROJECT. 
-    First, determine the visual style that fits the narrative atmosphere. 
-    Then, generate B-roll suggestions ensuring every AI prompt shares that exact same aesthetic style.
+    Analyze these script segments.
+    Apply the visual style: "${userStyle}" and tone: "${userTone}".
     
     Input Segments:
     ${JSON.stringify(segmentsPayload)}
@@ -128,7 +129,7 @@ export const generateBrollPlan = async (
             variants: searchQuery.variants || [],
             keywords: searchQuery.keywords || []
         },
-        styleParams: item.styleParams || { mood: "Neutral", style: "Standard" },
+        styleParams: item.styleParams || { mood: userTone, style: userStyle },
         sources: {
           googleImages: `https://www.google.com/search?tbm=isch&q=${queryEncoded}`,
           pexels: `https://www.pexels.com/search/${mediaType === 'VIDEO' ? 'videos/' : ''}${queryEncoded}`,

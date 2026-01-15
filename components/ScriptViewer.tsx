@@ -14,22 +14,22 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
         const suggestion = suggestions.find((s) => s.segmentId === segment.id);
         
         return (
-          <div key={segment.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col md:flex-row">
+          <div key={segment.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col md:flex-row transition-colors">
             {/* Script Column */}
-            <div className="md:w-1/3 p-6 bg-slate-50 border-r border-slate-100">
+            <div className="md:w-1/3 p-6 bg-slate-50 dark:bg-slate-900 border-r border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                <span>Block {segment.order + 1}</span>
+                <span>Bloque {segment.order + 1}</span>
               </div>
-              <p className="text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-serif">
+              <p className="text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap font-serif">
                 "{segment.originalText}"
               </p>
               
               {/* Detected Notes */}
               {segment.notes.length > 0 && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded-md text-xs text-yellow-800 flex items-start gap-2">
+                <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-100 dark:border-yellow-900/50 rounded-md text-xs text-yellow-800 dark:text-yellow-500 flex items-start gap-2">
                   <StickyNote className="w-4 h-4 shrink-0" />
                   <div>
-                    <span className="font-bold block mb-1">Detected Notes:</span>
+                    <span className="font-bold block mb-1">Notas Detectadas:</span>
                     <ul className="list-disc pl-4 space-y-1">
                       {segment.notes.map((note, i) => <li key={i}>{note}</li>)}
                     </ul>
@@ -39,33 +39,35 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
             </div>
 
             {/* B-Roll Suggestion Column */}
-            <div className="md:w-2/3 p-6 relative flex flex-col">
+            <div className="md:w-2/3 p-6 relative flex flex-col dark:text-slate-200">
               {suggestion ? (
                 <>
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-2">
                       <span className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${
-                        suggestion.mediaType === MediaType.VIDEO ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'
+                        suggestion.mediaType === MediaType.VIDEO 
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' 
+                            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
                       }`}>
                         {suggestion.mediaType === MediaType.VIDEO ? <Video className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
-                        {suggestion.mediaType}
+                        {suggestion.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGEN'}
                       </span>
-                      <span className="text-xs text-slate-500 border border-slate-200 px-2 py-1 rounded">
-                        Style: {suggestion.styleParams.style}
+                      <span className="text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 px-2 py-1 rounded">
+                        Estilo: {suggestion.styleParams.style}
                       </span>
                     </div>
                   </div>
 
-                  <h3 className="font-medium text-lg text-slate-900 mb-2">
+                  <h3 className="font-medium text-lg text-slate-900 dark:text-white mb-2">
                     {suggestion.visualIntent}
                   </h3>
 
-                  <div className="bg-slate-100 rounded p-3 mb-4">
-                     <p className="text-xs text-slate-500 uppercase font-bold mb-1">Rigorous Search Query</p>
-                     <p className="text-slate-800 font-mono text-sm">{suggestion.searchQuery.mainQuery}</p>
+                  <div className="bg-slate-100 dark:bg-slate-700/50 rounded p-3 mb-4">
+                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold mb-1">Búsqueda Rigurosa (Query)</p>
+                     <p className="text-slate-800 dark:text-slate-200 font-mono text-sm">{suggestion.searchQuery.mainQuery}</p>
                      <div className="mt-2 flex flex-wrap gap-2">
                         {suggestion.searchQuery.keywords.slice(0, 5).map(k => (
-                          <span key={k} className="text-xs bg-white border border-slate-300 text-slate-600 px-1.5 py-0.5 rounded">#{k}</span>
+                          <span key={k} className="text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">#{k}</span>
                         ))}
                      </div>
                   </div>
@@ -74,9 +76,9 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                     
                     {/* Source Links from Text (Priority) */}
                     {segment.extractedLinks && segment.extractedLinks.length > 0 && (
-                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
-                            <p className="text-xs font-bold text-blue-700 mb-2 uppercase tracking-wider flex items-center gap-2">
-                                <ExternalLink className="w-3 h-3" /> Linked Resources in Script
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-lg">
+                            <p className="text-xs font-bold text-blue-700 dark:text-blue-400 mb-2 uppercase tracking-wider flex items-center gap-2">
+                                <ExternalLink className="w-3 h-3" /> Recursos en el guion
                             </p>
                             <div className="flex flex-wrap gap-2">
                                 {segment.extractedLinks.map((link, idx) => (
@@ -92,7 +94,7 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                                         }`}
                                     >
                                         {link.type === 'YOUTUBE' ? <Youtube className="w-3 h-3" /> : <Download className="w-3 h-3" />}
-                                        {link.type === 'YOUTUBE' ? 'Open YouTube Video' : 'Open Source (Download)'}
+                                        {link.type === 'YOUTUBE' ? 'Ver Video' : 'Abrir Recurso'}
                                     </a>
                                 ))}
                             </div>
@@ -100,16 +102,16 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                     )}
 
                     <div>
-                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Stock Search</p>
+                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Buscar en Stock</p>
                         <div className="flex flex-wrap gap-2">
-                            <a href={suggestion.sources.googleImages} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 px-3 py-2 rounded-lg transition-colors">
+                            <a href={suggestion.sources.googleImages} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-3 py-2 rounded-lg transition-colors">
                                 <img src="https://www.google.com/favicon.ico" className="w-3 h-3" alt="Google" />
                                 Google
                             </a>
                             <a href={suggestion.sources.pexels} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#05a081] hover:bg-[#048a6f] text-white px-3 py-2 rounded-lg transition-colors">
                                 Pexels
                             </a>
-                            <a href={suggestion.sources.unsplash} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-black hover:bg-slate-800 text-white px-3 py-2 rounded-lg transition-colors">
+                            <a href={suggestion.sources.unsplash} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-black hover:bg-slate-800 dark:bg-slate-900 dark:border dark:border-slate-700 text-white px-3 py-2 rounded-lg transition-colors">
                                 Unsplash
                             </a>
                             <a href={suggestion.sources.pinterest} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#E60023] hover:bg-[#bd081c] text-white px-3 py-2 rounded-lg transition-colors">
@@ -120,17 +122,17 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                   </div>
 
                   {suggestion.aiPrompt && (
-                    <div className="mt-4 pt-4 border-t border-slate-100">
-                         <div className="flex items-center gap-1 text-xs text-indigo-600 font-bold mb-1">
-                             <Wand2 className="w-3 h-3" /> AI Generation Prompt
+                    <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                         <div className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 font-bold mb-1">
+                             <Wand2 className="w-3 h-3" /> Prompt para IA Generativa
                          </div>
-                         <p className="text-xs text-slate-600 italic">"{suggestion.aiPrompt}"</p>
+                         <p className="text-xs text-slate-600 dark:text-slate-400 italic">"{suggestion.aiPrompt}"</p>
                     </div>
                   )}
                 </>
               ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border-2 border-dashed border-slate-100 rounded-lg">
-                  No B-roll required for this segment.
+                <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border-2 border-dashed border-slate-100 dark:border-slate-700 rounded-lg">
+                  No se requiere B-roll para este segmento.
                 </div>
               )}
             </div>

@@ -34,6 +34,19 @@ export const getHistory = (userEmail: string): HistorySession[] => {
   return existingRaw ? JSON.parse(existingRaw) : [];
 };
 
+export const deleteSession = (userEmail: string, sessionId: string): HistorySession[] => {
+    if (!userEmail) return [];
+    const key = `${HISTORY_KEY_PREFIX}${userEmail}`;
+    const existingRaw = localStorage.getItem(key);
+    if (!existingRaw) return [];
+
+    let history: HistorySession[] = JSON.parse(existingRaw);
+    history = history.filter(h => h.id !== sessionId);
+    
+    localStorage.setItem(key, JSON.stringify(history));
+    return history;
+};
+
 export const clearHistory = (userEmail: string) => {
     const key = `${HISTORY_KEY_PREFIX}${userEmail}`;
     localStorage.removeItem(key);
