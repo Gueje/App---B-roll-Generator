@@ -39,8 +39,9 @@ function App() {
   const [currentFileName, setCurrentFileName] = useState<string>('');
   
   // Advanced Generation Options
-  const [userStyle, setUserStyle] = useState("Cinematic & High Quality");
-  const [userTone, setUserTone] = useState("Neutral");
+  // Default to Auto-Detect for better initial results
+  const [userStyle, setUserStyle] = useState("Auto-Detect");
+  const [userTone, setUserTone] = useState("Auto-Detect");
 
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'GENERATING' | 'EXPORTING'>('IDLE');
   const [error, setError] = useState<string | null>(null);
@@ -164,8 +165,8 @@ function App() {
     setStatus('IDLE');
     setError(null);
     // Reset options to default
-    setUserStyle("Cinematic & High Quality");
-    setUserTone("Neutral");
+    setUserStyle("Auto-Detect");
+    setUserTone("Auto-Detect");
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
     }
@@ -363,6 +364,7 @@ function App() {
                                     onChange={(e) => setUserStyle(e.target.value)}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
+                                    <option value="Auto-Detect">✨ Auto-Detect (IA Decision)</option>
                                     <option value="Cinematic & High Quality">Cinematográfico (Default)</option>
                                     <option value="Documentary & Raw">Documental / Realista</option>
                                     <option value="Minimalist & Clean">Minimalista / Corporativo</option>
@@ -381,6 +383,7 @@ function App() {
                                     onChange={(e) => setUserTone(e.target.value)}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
+                                    <option value="Auto-Detect">✨ Auto-Detect (IA Decision)</option>
                                     <option value="Neutral">Neutral (Informativo)</option>
                                     <option value="Emotional & Touching">Emocional / Conmovedor</option>
                                     <option value="Energetic & Fast">Energético / Rápido</option>
@@ -390,7 +393,7 @@ function App() {
                                 </select>
                             </div>
                             <div className="md:col-span-2 text-[10px] text-slate-400 dark:text-slate-500 italic text-center">
-                                Nota: Los bloques se definen por los párrafos de tu documento Word original.
+                                Nota: Los bloques se definen por las frases e ideas de tu documento.
                             </div>
                         </div>
                     )}

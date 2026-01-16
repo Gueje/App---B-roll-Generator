@@ -64,8 +64,17 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
 
                   <div className="bg-slate-100 dark:bg-slate-700/50 rounded p-3 mb-4">
                      <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold mb-1">Búsqueda Rigurosa (Query)</p>
-                     <p className="text-slate-800 dark:text-slate-200 font-mono text-sm">{suggestion.searchQuery.mainQuery}</p>
-                     <div className="mt-2 flex flex-wrap gap-2">
+                     <p className="text-slate-800 dark:text-slate-200 font-mono text-sm mb-2">{suggestion.searchQuery.mainQuery}</p>
+                     
+                     {/* YouTube specific query display */}
+                     {suggestion.searchQuery.youtubeQuery && (
+                       <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 border-t border-slate-200 dark:border-slate-600 pt-2 mb-2">
+                          <Youtube className="w-3 h-3" />
+                          <span className="font-mono">{suggestion.searchQuery.youtubeQuery}</span>
+                       </div>
+                     )}
+
+                     <div className="flex flex-wrap gap-2">
                         {suggestion.searchQuery.keywords.slice(0, 5).map(k => (
                           <span key={k} className="text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">#{k}</span>
                         ))}
@@ -102,11 +111,15 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                     )}
 
                     <div>
-                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Buscar en Stock</p>
+                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Buscar en Stock & Video</p>
                         <div className="flex flex-wrap gap-2">
                             <a href={suggestion.sources.googleImages} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-3 py-2 rounded-lg transition-colors">
                                 <img src="https://www.google.com/favicon.ico" className="w-3 h-3" alt="Google" />
                                 Google
+                            </a>
+                            <a href={suggestion.sources.youtube} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#FF0000] hover:bg-[#cc0000] text-white px-3 py-2 rounded-lg transition-colors">
+                                <Youtube className="w-3 h-3" />
+                                YouTube
                             </a>
                             <a href={suggestion.sources.pexels} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#05a081] hover:bg-[#048a6f] text-white px-3 py-2 rounded-lg transition-colors">
                                 Pexels

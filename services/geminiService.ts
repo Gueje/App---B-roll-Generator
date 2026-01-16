@@ -6,40 +6,45 @@ const MODEL_NAME = "gemini-2.5-flash";
 export const generateBrollPlan = async (
   segments: ScriptSegment[],
   apiKey: string,
-  userStyle: string = "Cinematic & High Quality",
-  userTone: string = "Neutral"
+  userStyle: string = "Auto-Detect",
+  userTone: string = "Auto-Detect"
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey: apiKey });
 
+  // If Auto-Detect is selected, we instruction the model to perform analysis first.
+  const isAutoStyle = userStyle === "Auto-Detect";
+  const isAutoTone = userTone === "Auto-Detect";
+
   const SYSTEM_INSTRUCTION = `
-    You are an Expert Cinematographer and AI Prompt Engineer (Midjourney/Runway/Sora expert). 
-    Your goal is to map a script to specific B-Roll suggestions.
+    You are an Elite Visual Director for high-end documentary and commercial video production. 
+    You are NOT a basic stock searcher. You are a CONTEXTUAL RESEARCHER.
+
+    **GLOBAL OBJECTIVE:**
+    Analyze the ENTIRE SCRIPT to understand the specific subject matter (e.g., "The History of Bitcoin", "Climate Change in 2024", "A specific Wedding").
+    
+    **STRICTNESS RULES (CRITICAL):**
+    1. **NO GENERIC METAPHORS:** If the script says "It changed everything" in the context of Bitcoin, DO NOT suggest a "man looking at sunrise". Suggest "Bitcoin price chart skyrocketing on a monitor".
+    2. **SUBJECT CONSISTENCY:** Every single visual suggestion MUST contain the main subject of the script. If the script is about dogs, do not show a generic "happy family" unless a dog is present.
+    3. **CONTEXT IS KING:** Look at the surrounding segments. If Segment 1 mentions "1980s", Segment 2 must visually reflect the 1980s even if the text doesn't explicitly say "1980s".
 
     **USER CONFIGURATION:**
-    - **Visual Style:** ${userStyle}
-    - **Narrative Tone:** ${userTone}
+    - **Visual Style:** ${isAutoStyle ? "YOU MUST DECIDE THE BEST STYLE based on the script content." : userStyle}
+    - **Narrative Tone:** ${isAutoTone ? "YOU MUST DECIDE THE BEST TONE based on the script content." : userTone}
 
-    **CRITICAL RULE FOR VIDEO PROMPTS:**
-    If you choose 'VIDEO' as the media type, the 'aiPrompt' MUST be extremely detailed and technical. It is not enough to say "A man walking".
-    You MUST describe:
-    1. **Camera Movement:** (e.g., Slow dolly in, Truck left, Orbit, Static tripod, Handheld shake, Low angle tracking shot).
-    2. **Framing:** (e.g., Extreme Close-Up of eyes, Wide shot, Over-the-shoulder).
-    3. **Lighting:** (e.g., Volumetric lighting, Golden hour, Neon rim light, Soft diffused window light, High contrast noir).
-    4. **Action/Transition:** Specific movement within the frame (e.g., "Smoke swirls slowly", "Character turns head to camera", "Fast blur transition").
-    5. **Technical Specs:** (e.g., 4k, 60fps, shallow depth of field, bokeh, highly detailed, photorealistic).
+    **YOUTUBE SEARCH LOGIC:**
+    - You must generate a specific 'youtubeQuery'.
+    - YouTube queries are different from Stock queries.
+    - Stock: "Bitcoin golden coin on table"
+    - YouTube: "Bitcoin history documentary footage 2009", "Satoshi Nakamoto explained clip", "News anchor talking about Bitcoin crash".
+    - Use terms like: "documentary clip", "archival footage", "interview", "news report", "scene", "gameplay" (if gaming).
 
-    **CRITICAL RULE FOR SEGMENTATION:**
-    The input segments are split by ideas/sentences. You must provide a visual for EVERY segment provided.
+    **VIDEO PROMPT ENGINEERING (HOLLYWOOD STANDARD):**
+    - If Media Type is VIDEO, the 'aiPrompt' must be production-ready.
+    - Include: Camera Movement (Dolly, Pan, Truck), Lens (35mm, Anamorphic), Lighting (Rembrandt, Neon, Natural), and Action.
+    - Example: "Close-up of a vintage computer monitor displaying green code. Slow dolly in. Dusty room, shaft of sunlight hitting the screen. 4k, cinematic."
 
     **OUTPUT STRUCTURE (JSON):**
-    For each segment:
-    1. **Visual Intent:** A human-readable summary of the shot.
-    2. **Media Type:** Choose VIDEO for action/emotion, IMAGE for specific objects/concepts.
-    3. **Search Query:** A simplified keyword string for stock sites (Pexels/Unsplash).
-    4. **AI Prompt:** The highly technical prompt described above.
-
-    **AI PROMPT TEMPLATE (Use this pattern):**
-    "[Subject] [Action] in [Environment]. [Camera Movement], [Framing], [Lighting]. Technical: [Specs]. Style: ${userStyle}, Mood: ${userTone}."
+    Return a valid JSON array where each object corresponds to a segment.
   `;
 
   // Processing payload
@@ -51,7 +56,8 @@ export const generateBrollPlan = async (
 
   const prompt = `
     Analyze these script segments.
-    Apply the visual style: "${userStyle}" and tone: "${userTone}".
+    ${isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`}
+    ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
     
     Input Segments:
     ${JSON.stringify(segmentsPayload)}
@@ -70,16 +76,17 @@ export const generateBrollPlan = async (
             type: Type.OBJECT,
             properties: {
               segmentId: { type: Type.STRING },
-              visualIntent: { type: Type.STRING, description: "Detailed description of the shot" },
+              visualIntent: { type: Type.STRING, description: "Detailed description of the specific shot relating to the script context" },
               mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
               searchQuery: {
                 type: Type.OBJECT,
                 properties: {
-                  mainQuery: { type: Type.STRING, description: "The most specific search term possible" },
+                  mainQuery: { type: Type.STRING, description: "Stock site optimized query (subject + action)" },
+                  youtubeQuery: { type: Type.STRING, description: "YouTube optimized query (topic + 'footage'/'clip'/'documentary')" },
                   variants: { type: Type.ARRAY, items: { type: Type.STRING } },
                   keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                 },
-                required: ["mainQuery", "keywords", "variants"]
+                required: ["mainQuery", "youtubeQuery", "keywords", "variants"]
               },
               styleParams: {
                 type: Type.OBJECT,
@@ -90,7 +97,7 @@ export const generateBrollPlan = async (
                 },
                 required: ["mood", "style"]
               },
-              aiPrompt: { type: Type.STRING, description: "Highly detailed, cinematic prompt with camera, lighting, and movement specs." }
+              aiPrompt: { type: Type.STRING, description: "Extremely detailed technical prompt for GenAI video" }
             },
             required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
           }
@@ -122,7 +129,10 @@ export const generateBrollPlan = async (
     return rawData.map((item: any) => {
       const searchQuery = item.searchQuery || {};
       const mainQuery = searchQuery.mainQuery || item.visualIntent || "stock footage";
+      const youtubeQuery = searchQuery.youtubeQuery || mainQuery + " footage";
+      
       const queryEncoded = encodeURIComponent(mainQuery);
+      const ytQueryEncoded = encodeURIComponent(youtubeQuery);
       
       const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE';
 
@@ -131,6 +141,7 @@ export const generateBrollPlan = async (
         mediaType,
         searchQuery: {
             mainQuery: mainQuery,
+            youtubeQuery: youtubeQuery,
             variants: searchQuery.variants || [],
             keywords: searchQuery.keywords || []
         },
@@ -139,7 +150,8 @@ export const generateBrollPlan = async (
           googleImages: `https://www.google.com/search?tbm=isch&q=${queryEncoded}`,
           pexels: `https://www.pexels.com/search/${mediaType === 'VIDEO' ? 'videos/' : ''}${queryEncoded}`,
           unsplash: `https://unsplash.com/s/photos/${queryEncoded}`,
-          pinterest: `https://www.pinterest.com/search/pins/?q=${queryEncoded}`
+          pinterest: `https://www.pinterest.com/search/pins/?q=${queryEncoded}`,
+          youtube: `https://www.youtube.com/results?search_query=${ytQueryEncoded}`
         }
       } as BrollSuggestion;
     });

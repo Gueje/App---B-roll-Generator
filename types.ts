@@ -18,6 +18,7 @@ export interface ScriptSegment {
 
 export interface SearchQuery {
   mainQuery: string;
+  youtubeQuery: string; // Specific query optimized for YouTube search
   variants: string[];
   keywords: string[];
 }
@@ -37,6 +38,7 @@ export interface BrollSuggestion {
     pexels: string;
     unsplash: string;
     pinterest: string;
+    youtube: string; // New source
   };
   aiPrompt?: string; // If AI generation is suggested
 }
