@@ -68,8 +68,8 @@ export const generateBrollPlan = async (
 
   let response;
   let attempts = 0;
-  const maxAttempts = 3;
-  let currentDelay = 2000; // Start with 2 seconds
+  const maxAttempts = 5; // Increased attempts due to high load
+  let currentDelay = 4000; // Increased initial delay to 4 seconds
 
   // Retry Loop
   while (attempts < maxAttempts) {
@@ -122,23 +122,34 @@ export const generateBrollPlan = async (
       attempts++;
       console.warn(`Gemini API attempt ${attempts} failed:`, error);
       
-      const isOverloaded = error.message?.includes('503') || error.status === 503 || error.code === 503;
-      const isRateLimit = error.message?.includes('429') || error.status === 429 || error.code === 429;
+      const errorMessage = error.message?.toLowerCase() || '';
+      
+      // Robust check for overload/503
+      const isOverloaded = 
+        errorMessage.includes('503') || 
+        errorMessage.includes('overloaded') ||
+        error.status === 503 || 
+        error.code === 503;
+
+      const isRateLimit = 
+        errorMessage.includes('429') || 
+        error.status === 429 || 
+        error.code === 429;
 
       if ((isOverloaded || isRateLimit) && attempts < maxAttempts) {
-          console.log(`Model overloaded or limited. Retrying in ${currentDelay}ms...`);
+          console.log(`Model overloaded or busy. Retrying in ${currentDelay}ms... (Attempt ${attempts}/${maxAttempts})`);
           await delay(currentDelay);
-          currentDelay *= 2; // Exponential backoff (2s -> 4s -> 8s)
+          currentDelay *= 2; // Exponential backoff (4s -> 8s -> 16s -> 32s)
       } else {
           // If error is not recoverable or max attempts reached, throw it.
           console.error("Gemini API Fatal Error:", error);
-          throw error;
+          throw new Error("El servicio de IA está saturado (Error 503). Por favor espera 1 minuto y vuelve a intentarlo.");
       }
     }
   }
 
   if (!response) {
-      throw new Error("Unable to connect to AI Service. Please try again in a minute.");
+      throw new Error("No se pudo conectar con el servicio de IA tras varios intentos.");
   }
 
   let jsonString = response.text;
