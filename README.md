@@ -1,9 +1,9 @@
 # B-Roll Generator
 
-A full-stack capable React application that automates the creation of B-roll plans from video scripts (Word documents).
+A full-stack capable React application that automates the creation of B-roll plans from video scripts (Word and PDF documents).
 
 ## Features
-- **Smart Parsing**: Extracts script text and editorial notes (e.g., [bracketed text]) from .docx files.
+- **Smart Parsing**: Extracts script text and editorial notes (e.g., [bracketed text]) from .docx and .pdf files.
 - **AI Analysis**: Uses Google Gemini 2.5 Flash to infer visual intent, style, and keywords.
 - **Automated Mapping**: 100% coverage ensures every script segment has a visual suggestion.
 - **Direct Export**: Creates a formatted Google Doc with clickable search links for stock footage (Pexels, Unsplash, Google Images).
@@ -37,7 +37,7 @@ Click the **Settings (Gear Icon)** in the top right corner.
 3. **Google API Key**: Create a standard API Key in Google Cloud Console restricted to Docs/Drive APIs.
 
 ## How it Works
-1. **Segmentation**: The app reads the raw ArrayBuffer of the .docx. It splits text by paragraphs. Text inside `[]` or `{}` is extracted as "Notes".
+1. **Segmentation**: The app reads the raw ArrayBuffer of the .docx or .pdf. It splits text by paragraphs. Text inside `[]` or `{}` is extracted as "Notes".
 2. **Analysis**: We send the segments to Gemini with a system prompt demanding JSON output containing visual descriptions, keywords, and media types.
 3. **Export**: Using the client-side Google API (`gapi`), we authenticate the user and batch-create a Google Doc, inserting text and formatting links dynamically.
 

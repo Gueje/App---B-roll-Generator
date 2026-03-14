@@ -5,6 +5,7 @@ import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
 import HowToGuide from './components/HowToGuide'; 
 import { parseDocx } from './services/docxService';
+import { parsePdf } from './services/pdfService';
 import { generateBrollPlan } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
 import { saveSession, getHistory, deleteSession } from './services/historyService';
@@ -45,6 +46,7 @@ function App() {
 
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'GENERATING' | 'EXPORTING'>('IDLE');
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,19 +72,40 @@ function App() {
     setHistory(loadedHistory);
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
+    let file: File | undefined;
+    
+    if ('files' in e.target && e.target.files) {
+      file = e.target.files[0];
+    } else if ('dataTransfer' in e && e.dataTransfer.files) {
+      file = e.dataTransfer.files[0];
+    }
+
     if (!file) return;
+
+    const isDocx = file.name.endsWith('.docx');
+    const isPdf = file.name.endsWith('.pdf');
+
+    if (!isDocx && !isPdf) {
+      setError("Formato de archivo no soportado. Por favor sube un archivo .docx o .pdf");
+      return;
+    }
 
     setStatus('PARSING');
     setError(null);
     setSegments([]);
     setSuggestions([]);
-    setCurrentFileName(file.name.replace('.docx', ''));
+    setCurrentFileName(file.name.replace(/\.(docx|pdf)$/, ''));
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const parsedSegments = await parseDocx(arrayBuffer);
+      let parsedSegments: ScriptSegment[] = [];
+      
+      if (isDocx) {
+        parsedSegments = await parseDocx(arrayBuffer);
+      } else {
+        parsedSegments = await parsePdf(arrayBuffer);
+      }
       
       if (parsedSegments.length === 0) {
         throw new Error("No se encontró texto legible en el documento.");
@@ -94,6 +117,21 @@ function App() {
       setError(err.message || "Error al leer el archivo");
       setStatus('IDLE');
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    handleFileUpload(e);
   };
 
   const handleGenerate = async () => {
@@ -247,7 +285,7 @@ function App() {
             {segments.length === 0 && (
                 <div className="mb-8 text-center max-w-3xl mx-auto bg-indigo-50/50 dark:bg-indigo-900/20 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-900">
                     <p className="text-slate-700 dark:text-slate-300 text-base md:text-lg leading-relaxed font-medium">
-                        Convierte tus guiones en planes visuales al instante. Sube tu archivo Word (.docx) y obtén sugerencias detalladas de imágenes y videos (B-Roll) que encajen perfectamente con tu historia.
+                        Convierte tus guiones en planes visuales al instante. Sube tu archivo Word (.docx) o PDF (.pdf) y obtén sugerencias detalladas de imágenes y videos (B-Roll) que encajen perfectamente con tu historia.
                     </p>
                 </div>
             )}
@@ -263,28 +301,47 @@ function App() {
             {/* Empty State / Upload */}
             {segments.length === 0 && (
             <>
-                <div className="mt-4 text-center p-8 md:p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div 
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`mt-4 text-center p-8 md:p-12 border-2 border-dashed rounded-2xl transition-all ${
+                        isDragging 
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 scale-[1.02]' 
+                        : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                    }`}
+                >
                     <div className="w-14 h-14 md:w-16 md:h-16 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Upload className="w-7 h-7 md:w-8 md:h-8" />
                     </div>
                     <h2 className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white mb-2">Sube tu Guion</h2>
                     <p className="text-slate-500 dark:text-slate-400 mb-6 md:mb-8 max-w-md mx-auto text-sm md:text-base">
-                        Selecciona un archivo .docx. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
+                        Arrastra y suelta o selecciona un archivo .docx o .pdf. Extraeremos el texto y generaremos sugerencias visuales rigurosas.
                     </p>
                     <input
                         type="file"
-                        accept=".docx"
+                        accept=".docx,.pdf"
                         ref={fileInputRef}
                         onChange={handleFileUpload}
                         className="hidden"
                     />
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 dark:shadow-none transition-all transform hover:-translate-y-1 active:scale-95"
-                        disabled={status === 'PARSING'}
-                    >
-                        {status === 'PARSING' ? <div className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Leyendo...</div> : "Seleccionar Documento"}
-                    </button>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-lg shadow-indigo-200 dark:shadow-none transition-all transform hover:-translate-y-1 active:scale-95 flex items-center justify-center gap-2"
+                            disabled={status === 'PARSING'}
+                        >
+                            {status === 'PARSING' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+                            {status === 'PARSING' ? "Leyendo..." : "Subir Guion"}
+                        </button>
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full md:w-auto px-8 py-3 bg-white dark:bg-slate-700 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 font-medium transition-all"
+                            disabled={status === 'PARSING'}
+                        >
+                            Seleccionar Documento
+                        </button>
+                    </div>
                 </div>
                 
                 {/* How to Guide (Rendered below upload box) */}
@@ -297,7 +354,7 @@ function App() {
             <div className="space-y-6 md:space-y-8">
                 
                 {/* Toolbar & Advanced Options */}
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 sticky top-20 z-20 space-y-4 md:space-y-0">
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 space-y-4 md:space-y-0">
                     
                     {/* Top Row: Info + Action Buttons */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

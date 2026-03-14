@@ -21,9 +21,9 @@ const HowToGuide: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="flex flex-col items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 flex items-center justify-center font-bold">1</div>
-              <h4 className="font-semibold text-slate-800 dark:text-white">Sube tu Guion (.docx)</h4>
+              <h4 className="font-semibold text-slate-800 dark:text-white">Sube tu Guion (.docx o .pdf)</h4>
               <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                La aplicación toma tu archivo Word y separa el texto en bloques lógicos. También detecta automáticamente cualquier nota que hayas dejado entre corchetes `[Nota]` o llaves {`{Nota}`}.
+                La aplicación toma tu archivo Word o PDF y separa el texto en bloques lógicos. También detecta automáticamente cualquier nota que hayas dejado entre corchetes `[Nota]` o llaves {`{Nota}`}.
               </p>
             </div>
             <div className="flex flex-col items-start gap-3">
