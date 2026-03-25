@@ -244,9 +244,16 @@ function App() {
                 </div>
                 <div className="overflow-hidden">
                     <h1 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white tracking-tight truncate">Generador B-Roll</h1>
-                    <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-[150px] md:max-w-none">
-                        {currentFileName ? currentFileName : "Nuevo Proyecto"}
-                    </p>
+                    <div className="flex items-center gap-2">
+                        <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-[150px] md:max-w-none">
+                            {currentFileName ? currentFileName : "Nuevo Proyecto"}
+                        </p>
+                        {segments.length > 0 && (
+                            <span className="text-[10px] md:text-xs px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-md font-bold border border-indigo-100 dark:border-indigo-800 shrink-0 animate-fade-in">
+                                {segments.length} bloques
+                            </span>
+                        )}
+                    </div>
                 </div>
             </div>
             
@@ -360,7 +367,7 @@ function App() {
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm md:text-base">
                             <FileText className="w-4 h-4 md:w-5 md:h-5" />
-                            <span className="font-semibold">{segments.length} bloques encontrados</span>
+                            <span className="font-semibold">Configuración de Generación</span>
                         </div>
                         
                         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
