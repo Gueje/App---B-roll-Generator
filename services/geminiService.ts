@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ScriptSegment, BrollSuggestion, MediaType } from "../types";
+import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types";
 
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-3-flash-preview"; 
 
 // Helper for waiting/backoff
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -10,13 +10,20 @@ export const generateBrollPlan = async (
   segments: ScriptSegment[],
   apiKey: string,
   userStyle: string = "Auto-Detect",
-  userTone: string = "Auto-Detect"
+  userTone: string = "Auto-Detect",
+  aspectRatio: string = "16:9",
+  resolution: string = "4k",
+  customStyle?: CustomStyle
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey: apiKey });
 
   // If Auto-Detect is selected, we instruction the model to perform analysis first.
   const isAutoStyle = userStyle === "Auto-Detect";
   const isAutoTone = userTone === "Auto-Detect";
+
+  const styleInstruction = customStyle 
+    ? `USE THIS CUSTOM STYLE INSTRUCTION: ${customStyle.instruction}` 
+    : (isAutoStyle ? "YOU MUST DECIDE THE BEST STYLE based on the script content." : userStyle);
 
   const SYSTEM_INSTRUCTION = `
     You are an Elite Visual Director for high-end documentary and commercial video production. 
@@ -31,8 +38,10 @@ export const generateBrollPlan = async (
     3. **CONTEXT IS KING:** Look at the surrounding segments. If Segment 1 mentions "1980s", Segment 2 must visually reflect the 1980s even if the text doesn't explicitly say "1980s".
 
     **USER CONFIGURATION:**
-    - **Visual Style:** ${isAutoStyle ? "YOU MUST DECIDE THE BEST STYLE based on the script content." : userStyle}
+    - **Visual Style:** ${styleInstruction}
     - **Narrative Tone:** ${isAutoTone ? "YOU MUST DECIDE THE BEST TONE based on the script content." : userTone}
+    - **Aspect Ratio:** ${aspectRatio}
+    - **Resolution:** ${resolution}
 
     **YOUTUBE SEARCH LOGIC:**
     - You must generate a specific 'youtubeQuery'.
@@ -44,7 +53,9 @@ export const generateBrollPlan = async (
     **VIDEO PROMPT ENGINEERING (HOLLYWOOD STANDARD):**
     - If Media Type is VIDEO, the 'aiPrompt' must be production-ready.
     - Include: Camera Movement (Dolly, Pan, Truck), Lens (35mm, Anamorphic), Lighting (Rembrandt, Neon, Natural), and Action.
-    - Example: "Close-up of a vintage computer monitor displaying green code. Slow dolly in. Dusty room, shaft of sunlight hitting the screen. 4k, cinematic."
+    - IMPORTANT: Always include the Aspect Ratio (${aspectRatio}) and Resolution (${resolution}) in the 'aiPrompt'.
+    - If a reference image is provided, replicate its style, density, and texture exactly in the 'aiPrompt'.
+    - Example: "Close-up of a vintage computer monitor displaying green code. Slow dolly in. Dusty room, shaft of sunlight hitting the screen. Aspect Ratio ${aspectRatio}, Resolution ${resolution}, cinematic."
 
     **OUTPUT STRUCTURE (JSON):**
     Return a valid JSON array where each object corresponds to a segment.
@@ -57,26 +68,51 @@ export const generateBrollPlan = async (
     notes: s.notes.join("; ")
   }));
 
-  const prompt = `
+  const promptText = `
     Analyze these script segments.
-    ${isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`}
+    ${customStyle ? `Apply custom style: ${customStyle.name}` : (isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`)}
     ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
     
     Input Segments:
     ${JSON.stringify(segmentsPayload)}
   `;
 
+  const contents: any[] = [];
+  
+  if (customStyle?.imageReference) {
+    // Extract base64 and mime type
+    const match = customStyle.imageReference.match(/^data:(image\/\w+);base64,(.*)$/);
+    if (match) {
+      contents.push({
+        role: "user",
+        parts: [
+          { text: promptText },
+          {
+            inlineData: {
+              mimeType: match[1],
+              data: match[2]
+            }
+          }
+        ]
+      });
+    } else {
+      contents.push({ role: "user", parts: [{ text: promptText }] });
+    }
+  } else {
+    contents.push({ role: "user", parts: [{ text: promptText }] });
+  }
+
   let response;
   let attempts = 0;
-  const maxAttempts = 5; // Increased attempts due to high load
-  let currentDelay = 4000; // Increased initial delay to 4 seconds
+  const maxAttempts = 5; 
+  let currentDelay = 4000; 
 
   // Retry Loop
   while (attempts < maxAttempts) {
     try {
-      response = await ai.models.generateContent({
+      const result = await ai.models.generateContent({
         model: MODEL_NAME,
-        contents: prompt,
+        contents: contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
@@ -115,6 +151,7 @@ export const generateBrollPlan = async (
         }
       });
       
+      response = result;
       // Success! Exit loop.
       break;
 
@@ -151,7 +188,7 @@ export const generateBrollPlan = async (
   if (!response) {
       throw new Error("No se pudo conectar con el servicio de IA tras varios intentos.");
   }
-
+  
   let jsonString = response.text;
   if (!jsonString) {
     throw new Error("No response from Gemini");

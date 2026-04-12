@@ -48,6 +48,13 @@ export interface AnalysisResult {
   suggestions: BrollSuggestion[];
 }
 
+export interface CustomStyle {
+  id: string;
+  name: string;
+  instruction: string;
+  imageReference?: string; // Base64 or URL
+}
+
 export interface AppConfig {
   geminiKey: string;
 }

@@ -1,15 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
 import HowToGuide from './components/HowToGuide'; 
+import CustomStyleModal from './components/CustomStyleModal';
 import { parseDocx } from './services/docxService';
 import { parsePdf } from './services/pdfService';
 import { generateBrollPlan } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
 import { saveSession, getHistory, deleteSession } from './services/historyService';
-import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession } from './types';
+import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
 const INITIAL_CONFIG: AppConfig = {
   geminiKey: localStorage.getItem('br_geminiKey') || '',
@@ -34,15 +35,23 @@ function App() {
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); 
+  const [isCustomStyleModalOpen, setIsCustomStyleModalOpen] = useState(false);
 
   const [segments, setSegments] = useState<ScriptSegment[]>([]);
   const [suggestions, setSuggestions] = useState<BrollSuggestion[]>([]);
   const [currentFileName, setCurrentFileName] = useState<string>('');
   
+  const [customStyles, setCustomStyles] = useState<CustomStyle[]>(() => {
+    const saved = localStorage.getItem('br_customStyles');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Advanced Generation Options
   // Default to Auto-Detect for better initial results
   const [userStyle, setUserStyle] = useState("Auto-Detect");
   const [userTone, setUserTone] = useState("Auto-Detect");
+  const [aspectRatio, setAspectRatio] = useState("16:9");
+  const [resolution, setResolution] = useState("4k");
 
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'GENERATING' | 'EXPORTING'>('IDLE');
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +63,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('br_geminiKey', config.geminiKey);
   }, [config]);
+
+  useEffect(() => {
+    localStorage.setItem('br_customStyles', JSON.stringify(customStyles));
+  }, [customStyles]);
 
   // Dark Mode Effect
   useEffect(() => {
@@ -145,8 +158,19 @@ function App() {
     setError(null);
 
     try {
+      // Find if userStyle is a custom style
+      const customStyle = customStyles.find(s => s.id === userStyle);
+      
       // Pass the key AND the new style/tone options
-      const results = await generateBrollPlan(segments, config.geminiKey, userStyle, userTone);
+      const results = await generateBrollPlan(
+        segments, 
+        config.geminiKey, 
+        customStyle ? "Custom" : userStyle, 
+        userTone,
+        aspectRatio,
+        resolution,
+        customStyle
+      );
       setSuggestions(results);
       
       // Save to History
@@ -349,6 +373,22 @@ function App() {
                             Seleccionar Documento
                         </button>
                     </div>
+
+                    {/* Custom Style Section */}
+                    <div className="mt-8 pt-8 border-t border-slate-100 dark:border-slate-700">
+                        <div className="flex flex-col items-center">
+                            <button 
+                                onClick={() => setIsCustomStyleModalOpen(true)}
+                                className="flex items-center gap-2 px-6 py-3 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all font-bold shadow-sm"
+                            >
+                                <Palette className="w-5 h-5" />
+                                Crear estilo visual
+                            </button>
+                            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 max-w-sm">
+                                Define un estilo personalizado con imágenes de referencia e instrucciones detalladas para que la IA lo use en tus proyectos.
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 
                 {/* How to Guide (Rendered below upload box) */}
@@ -418,7 +458,7 @@ function App() {
 
                     {/* Advanced Options Row (Visible when not generated yet, or when user wants to see settings) */}
                     {suggestions.length === 0 && (
-                        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+                        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
                                     <Sliders className="w-3 h-3" /> Estilo Visual
@@ -428,14 +468,23 @@ function App() {
                                     onChange={(e) => setUserStyle(e.target.value)}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
-                                    <option value="Auto-Detect">✨ Auto-Detect (IA Decision)</option>
-                                    <option value="Cinematic & High Quality">Cinematográfico (Default)</option>
-                                    <option value="Documentary & Raw">Documental / Realista</option>
-                                    <option value="Minimalist & Clean">Minimalista / Corporativo</option>
-                                    <option value="Cyberpunk & Neon">Cyberpunk / Futurista</option>
-                                    <option value="Vintage & Grainy">Vintage / Retro</option>
-                                    <option value="Bright & Commercial">Comercial / Publicidad TV</option>
-                                    <option value="Dark & Moody">Oscuro / Dramático</option>
+                                    <optgroup label="Básicos">
+                                        <option value="Auto-Detect">✨ Auto-Detect (IA Decision)</option>
+                                        <option value="Cinematic & High Quality">Cinematográfico (Default)</option>
+                                        <option value="Documentary & Raw">Documental / Realista</option>
+                                        <option value="Minimalist & Clean">Minimalista / Corporativo</option>
+                                        <option value="Cyberpunk & Neon">Cyberpunk / Futurista</option>
+                                        <option value="Vintage & Grainy">Vintage / Retro</option>
+                                        <option value="Bright & Commercial">Comercial / Publicidad TV</option>
+                                        <option value="Dark & Moody">Oscuro / Dramático</option>
+                                    </optgroup>
+                                    {customStyles.length > 0 && (
+                                        <optgroup label="Mis Estilos">
+                                            {customStyles.map(style => (
+                                                <option key={style.id} value={style.id}>🎨 {style.name}</option>
+                                            ))}
+                                        </optgroup>
+                                    )}
                                 </select>
                             </div>
                             <div>
@@ -456,7 +505,34 @@ function App() {
                                     <option value="Suspenseful">Misterioso / Suspenso</option>
                                 </select>
                             </div>
-                            <div className="md:col-span-2 text-[10px] text-slate-400 dark:text-slate-500 italic text-center">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
+                                    <Monitor className="w-3 h-3" /> Relación de aspecto
+                                </label>
+                                <select 
+                                    value={aspectRatio}
+                                    onChange={(e) => setAspectRatio(e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="16:9">16:9 (Horizontal)</option>
+                                    <option value="9:16">9:16 (Vertical)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
+                                    <Maximize className="w-3 h-3" /> Resolución
+                                </label>
+                                <select 
+                                    value={resolution}
+                                    onChange={(e) => setResolution(e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="2k">2k</option>
+                                    <option value="4k">4k</option>
+                                    <option value="8k">8k</option>
+                                </select>
+                            </div>
+                            <div className="lg:col-span-4 text-[10px] text-slate-400 dark:text-slate-500 italic text-center">
                                 Nota: Los bloques se definen por las frases e ideas de tu documento.
                             </div>
                         </div>
@@ -475,6 +551,15 @@ function App() {
             onSave={(newConfig) => {
             setConfig(newConfig);
             setIsSettingsOpen(false);
+            }}
+        />
+
+        <CustomStyleModal 
+            isOpen={isCustomStyleModalOpen}
+            onClose={() => setIsCustomStyleModalOpen(false)}
+            onSave={(newStyle) => {
+                setCustomStyles([...customStyles, newStyle]);
+                setUserStyle(newStyle.id); // Automatically select the new style
             }}
         />
       </div>
