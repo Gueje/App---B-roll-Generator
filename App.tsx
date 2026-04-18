@@ -604,6 +604,13 @@ function App() {
                 setUserStyle(newStyle.id); // Automatically select the new style
             }}
         />
+
+        {/* Version Badge for Deployment Verification */}
+        <div className="fixed bottom-4 right-4 z-50">
+            <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono">
+                v2.1 - Etapas de 30
+            </div>
+        </div>
       </div>
     </div>
   );
