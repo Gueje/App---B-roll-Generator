@@ -222,17 +222,20 @@ export const generateBrollPlan = async (
   aspectRatio: string = "16:9",
   resolution: string = "4k",
   customStyle?: CustomStyle,
-  projectContext?: string
+  projectContext?: string,
+  onProgress?: (step: "analyzing" | "generating", context?: GlobalContext) => void
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey });
 
   // --- STEP 1: Global analysis (locked anchor) ---
+  onProgress?.("analyzing");
   const globalContext = await analyzeScriptGlobally(
     segments,
     apiKey,
     projectContext
   );
   console.log("Global context derived:", globalContext);
+  onProgress?.("generating", globalContext);
 
   // --- STEP 2: Per-segment generation ---
   const isAutoStyle = userStyle === "Auto-Detect";

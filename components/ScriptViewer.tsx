@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScriptSegment, BrollSuggestion, MediaType } from '../types';
-import { Video, Image as ImageIcon, Wand2, StickyNote, ExternalLink, Youtube, Download } from 'lucide-react';
+import { Video, Image as ImageIcon, Wand2, StickyNote, ExternalLink, Youtube, Download, Copy, Check } from 'lucide-react';
 
 interface Props {
   segments: ScriptSegment[];
@@ -8,6 +8,14 @@ interface Props {
 }
 
 const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   return (
     <div className="space-y-6">
       {segments.map((segment) => {
@@ -63,7 +71,19 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                   </h3>
 
                   <div className="bg-slate-100 dark:bg-slate-700/50 rounded p-3 mb-4">
-                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold mb-1">Búsqueda Rigurosa (Query)</p>
+                     <div className="flex items-center justify-between mb-1">
+                       <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold">Búsqueda Rigurosa (Query)</p>
+                       <button
+                         onClick={() => handleCopy(suggestion.searchQuery.mainQuery, segment.id)}
+                         className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                         title="Copiar búsqueda"
+                       >
+                         {copiedId === segment.id
+                           ? <><Check className="w-3 h-3 text-green-500" /><span className="text-green-500">Copiado</span></>
+                           : <><Copy className="w-3 h-3" /><span>Copiar</span></>
+                         }
+                       </button>
+                     </div>
                      <p className="text-slate-800 dark:text-slate-200 font-mono text-sm mb-2">{suggestion.searchQuery.mainQuery}</p>
                      
                      {/* YouTube specific query display */}

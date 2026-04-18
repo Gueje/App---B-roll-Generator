@@ -87,9 +87,14 @@ const Sidebar: React.FC<Props> = ({ user, history, onSelectSession, onDeleteSess
                                 <FileVideo className="w-4 h-4 shrink-0" />
                                 <span className="text-sm font-bold truncate w-[140px]">{session.scriptName}</span>
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <Clock className="w-3 h-3" />
-                                {new Date(session.date).toLocaleDateString()}
+                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <Clock className="w-3 h-3 shrink-0" />
+                                <span>{new Date(session.date).toLocaleDateString('es', {day:'numeric',month:'short',year:'2-digit'})}</span>
+                                {session.suggestions.length > 0 && (
+                                  <span className="ml-auto bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                                    {session.suggestions.length} visuales
+                                  </span>
+                                )}
                             </div>
                           </div>
 
@@ -113,7 +118,7 @@ const Sidebar: React.FC<Props> = ({ user, history, onSelectSession, onDeleteSess
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-800 text-center text-xs text-slate-600 bg-slate-950">
-            <p>Generador de B-Roll v1.2</p>
+            <p>Generador de B-Roll v1.3</p>
             <p className="opacity-50 mt-1">Modo Local Storage</p>
         </div>
       </div>
