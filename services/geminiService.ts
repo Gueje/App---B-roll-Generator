@@ -280,7 +280,13 @@ async function generateBatchPlan(
       .join("; "),
   }));
 
-  const promptText = `${customStyle ? `Apply custom style: ${customStyle.name}\n\n` : ""}Produce ONE B-roll suggestion for EACH of the following ${batch.length} segments. Return exactly ${batch.length} items in the same order, one per id:
+  const promptText = `${customStyle ? `Apply custom style: ${customStyle.name}\n\n` : ""}Produce ONE B-roll suggestion for EACH of the following ${batch.length} segments.
+
+Return ONLY a valid JSON array — no markdown, no explanation, no wrapper object.
+Each element must match this structure exactly:
+{"segmentId":"<id>","visualIntent":"<shot description>","mediaType":"VIDEO" or "IMAGE","searchQuery":{"mainQuery":"2-5 keywords","youtubeQuery":"youtube query","variants":["alt1","alt2"],"keywords":["tag1","tag2","tag3"]},"styleParams":{"mood":"<mood>","style":"<style>"},"aiPrompt":"<video prompt>"}
+
+Segments to process (return exactly ${batch.length} items, same order):
 ${JSON.stringify(batchPayload, null, 2)}`;
 
   const contents: any[] = [];
@@ -311,19 +317,9 @@ ${JSON.stringify(batchPayload, null, 2)}`;
       temperature: TEMPERATURE_PLAN_DEFAULT,
       maxOutputTokens: MAX_OUTPUT_TOKENS_BATCH,
       responseMimeType: "application/json",
-      // IMPORTANT: Gemini's responseSchema requires the root type to be OBJECT.
-      // Using Type.ARRAY at the root is not officially supported and causes
-      // malformed/unparseable responses. We wrap the array in an object.
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          suggestions: {
-            type: Type.ARRAY,
-            items: BROLL_ITEM_SCHEMA,
-          },
-        },
-        required: ["suggestions"],
-      },
+      // No responseSchema: the explicit JSON structure in the prompt text +
+      // responseMimeType is enough and avoids schema-enforcement failures
+      // that occur with different model versions and SDK configurations.
     },
   });
 
