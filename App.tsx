@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, MessageSquare, Brain, Sparkles } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Brain, Sparkles } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -52,10 +52,6 @@ function App() {
   const [userTone, setUserTone] = useState("Auto-Detect");
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("4k");
-
-  // Phase 1.1: Free-text project context. The most effective anchor for
-  // contextual fidelity — injected into both Step 1 (analysis) and Step 2
-  // (per-segment generation) via geminiService.
   const [projectContext, setProjectContext] = useState("");
 
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'ANALYZING' | 'GENERATING' | 'EXPORTING'>('IDLE');
@@ -167,10 +163,7 @@ function App() {
     setError(null);
 
     try {
-      // Find if userStyle is a custom style
       const customStyle = customStyles.find(s => s.id === userStyle);
-
-      // Pass the key AND the new style/tone options
       const results = await generateBrollPlan(
         segments,
         config.geminiKey,
@@ -254,7 +247,6 @@ function App() {
     // Reset options to default
     setUserStyle("Auto-Detect");
     setUserTone("Auto-Detect");
-    setProjectContext("");
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
     }
@@ -464,9 +456,7 @@ function App() {
                                 <><Loader2 className="w-4 h-4 animate-spin" /><Brain className="w-4 h-4" /> Analizando guion... (1/2)</>
                             ) : status === 'GENERATING' ? (
                                 <><Loader2 className="w-4 h-4 animate-spin" /><Sparkles className="w-4 h-4" />
-                                {batchProgress
-                                  ? `Generando visuales... lote ${batchProgress.current}/${batchProgress.total}`
-                                  : 'Generando visuales... (2/2)'}
+                                {batchProgress ? `Generando visuales... lote ${batchProgress.current}/${batchProgress.total}` : 'Generando visuales... (2/2)'}
                                 </>
                             ) : suggestions.length > 0 ? (
                                 <><Sparkles className="w-4 h-4" /> Visuales Generados</>
@@ -487,26 +477,6 @@ function App() {
                             )}
                         </div>
                     </div>
-
-                    {/* Project Context (free text — the most important anchor for contextual fidelity) */}
-                    {suggestions.length === 0 && (
-                        <div className="pt-4 border-t border-slate-100 dark:border-slate-700 animate-fade-in">
-                            <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
-                                <MessageSquare className="w-3 h-3" /> Contexto del Proyecto
-                                <span className="ml-1 text-[10px] font-normal normal-case text-slate-400 dark:text-slate-500">(opcional pero MUY recomendado)</span>
-                            </label>
-                            <textarea
-                                value={projectContext}
-                                onChange={(e) => setProjectContext(e.target.value)}
-                                rows={2}
-                                placeholder="Ej: Video largo sobre la historia de Black Hole Sun de Soundgarden. Tono de ensayo periodístico, con énfasis en la escena grunge de Seattle a principios de los 90."
-                                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                            />
-                            <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 italic">
-                                Esta descripción ancla a la IA al tema real de tu video. Reduce drásticamente las sugerencias genéricas o fuera de contexto.
-                            </p>
-                        </div>
-                    )}
 
                     {/* Advanced Options Row (Visible when not generated yet, or when user wants to see settings) */}
                     {suggestions.length === 0 && (
