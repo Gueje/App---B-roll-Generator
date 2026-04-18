@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+// Deploy Version: 2.1.2 - Chunking & Paging Active
 import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
