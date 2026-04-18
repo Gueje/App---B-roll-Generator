@@ -59,18 +59,6 @@ export interface AppConfig {
   geminiKey: string;
 }
 
-export interface GlobalContext {
-  topic: string;
-  genre: string;
-  era: string;
-  mainEntities: string[];
-  characters: string[];
-  locations: string[];
-  detectedTone: string;
-  detectedStyle: string;
-  keyTerms: string[];
-}
-
 export interface ExportStats {
   totalSegments: number;
   coveredSegments: number;

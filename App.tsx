@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Brain, Sparkles } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -10,7 +10,7 @@ import { parsePdf } from './services/pdfService';
 import { generateBrollPlan } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
 import { saveSession, getHistory, deleteSession } from './services/historyService';
-import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle, GlobalContext } from './types';
+import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
 const INITIAL_CONFIG: AppConfig = {
   geminiKey: localStorage.getItem('br_geminiKey') || '',
@@ -52,11 +52,8 @@ function App() {
   const [userTone, setUserTone] = useState("Auto-Detect");
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("4k");
-  const [projectContext, setProjectContext] = useState("");
 
-  const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'ANALYZING' | 'GENERATING' | 'EXPORTING'>('IDLE');
-  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
-  const [globalContext, setGlobalContext] = useState<GlobalContext | null>(null);
+  const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'GENERATING' | 'EXPORTING'>('IDLE');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -157,35 +154,22 @@ function App() {
         return;
     }
 
-    setStatus('ANALYZING');
-    setBatchProgress(null);
-    setGlobalContext(null);
+    setStatus('GENERATING');
     setError(null);
 
     try {
+      // Find if userStyle is a custom style
       const customStyle = customStyles.find(s => s.id === userStyle);
+      
+      // Pass the key AND the new style/tone options
       const results = await generateBrollPlan(
-        segments,
-        config.geminiKey,
-        customStyle ? "Custom" : userStyle,
+        segments, 
+        config.geminiKey, 
+        customStyle ? "Custom" : userStyle, 
         userTone,
         aspectRatio,
         resolution,
-        customStyle,
-        projectContext.trim() || undefined,
-        (step, ctx, batchNum, totalBatches) => {
-          if (step === 'analyzing') {
-            setStatus('ANALYZING');
-            setBatchProgress(null);
-          }
-          if (step === 'generating') {
-            setStatus('GENERATING');
-            if (ctx) setGlobalContext(ctx);
-            if (batchNum !== undefined && totalBatches !== undefined) {
-              setBatchProgress({ current: batchNum, total: totalBatches });
-            }
-          }
-        }
+        customStyle
       );
       setSuggestions(results);
       
@@ -242,8 +226,6 @@ function App() {
     setCurrentFileName('');
     setStatus('IDLE');
     setError(null);
-    setBatchProgress(null);
-    setGlobalContext(null);
     // Reset options to default
     setUserStyle("Auto-Detect");
     setUserTone("Auto-Detect");
@@ -434,7 +416,7 @@ function App() {
                             {suggestions.length > 0 && (
                                 <button 
                                     onClick={handleRegenerate}
-                                    disabled={status === 'ANALYZING' || status === 'GENERATING'}
+                                    disabled={status !== 'IDLE'}
                                     className="px-4 py-2.5 rounded-lg font-medium border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 flex items-center justify-center gap-2 text-sm md:text-base transition-colors"
                                     title="Volver a generar con nuevos ajustes"
                                 >
@@ -445,21 +427,17 @@ function App() {
 
                             <button
                                 onClick={handleGenerate}
-                                disabled={status === 'ANALYZING' || status === 'GENERATING' || suggestions.length > 0}
+                                disabled={status !== 'IDLE' || suggestions.length > 0}
                                 className={`w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium flex justify-center items-center gap-2 transition-colors text-sm md:text-base ${
                                     suggestions.length > 0 
                                     ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 cursor-default' 
                                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100 dark:shadow-none'
                                 }`}
                             >
-                            {status === 'ANALYZING' ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /><Brain className="w-4 h-4" /> Analizando guion... (1/2)</>
-                            ) : status === 'GENERATING' ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /><Sparkles className="w-4 h-4" />
-                                {batchProgress ? `Generando visuales... lote ${batchProgress.current}/${batchProgress.total}` : 'Generando visuales... (2/2)'}
-                                </>
+                            {status === 'GENERATING' ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Analizando...</>
                             ) : suggestions.length > 0 ? (
-                                <><Sparkles className="w-4 h-4" /> Visuales Generados</>
+                                "Visuales Generados"
                             ) : (
                                 "Generar Visuales"
                             )}
