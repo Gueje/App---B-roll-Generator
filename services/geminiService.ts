@@ -1,8 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, CustomStyle, GlobalContext } from "../types";
 
-// Phase 0.1: Use the latest stable Gemini 2.5 Flash model.
-const MODEL_NAME = "gemini-2.5-flash";
+// Use the stable Gemini 2.0 Flash model.
+// gemini-2.0-flash is the proven stable release with reliable structured-output
+// support on the free tier. gemini-2.5-flash is a preview/thinking model that
+// can produce inconsistent JSON when responseSchema is used.
+const MODEL_NAME = "gemini-2.0-flash";
 
 // Token budgets
 const MAX_OUTPUT_TOKENS_ANALYSIS = 2048;
@@ -308,9 +311,18 @@ ${JSON.stringify(batchPayload, null, 2)}`;
       temperature: TEMPERATURE_PLAN_DEFAULT,
       maxOutputTokens: MAX_OUTPUT_TOKENS_BATCH,
       responseMimeType: "application/json",
+      // IMPORTANT: Gemini's responseSchema requires the root type to be OBJECT.
+      // Using Type.ARRAY at the root is not officially supported and causes
+      // malformed/unparseable responses. We wrap the array in an object.
       responseSchema: {
-        type: Type.ARRAY,
-        items: BROLL_ITEM_SCHEMA,
+        type: Type.OBJECT,
+        properties: {
+          suggestions: {
+            type: Type.ARRAY,
+            items: BROLL_ITEM_SCHEMA,
+          },
+        },
+        required: ["suggestions"],
       },
     },
   });
@@ -320,10 +332,18 @@ ${JSON.stringify(batchPayload, null, 2)}`;
 
   try {
     const parsed = parseJsonResponse(jsonString);
-    if (!Array.isArray(parsed)) {
-      throw new Error("Batch response is not an array.");
+    // Extract from the object wrapper, with graceful fallbacks.
+    let arr: any[];
+    if (Array.isArray(parsed)) {
+      arr = parsed; // Defensive: model returned bare array despite schema
+    } else if (Array.isArray(parsed?.suggestions)) {
+      arr = parsed.suggestions;
+    } else if (Array.isArray(parsed?.items)) {
+      arr = parsed.items;
+    } else {
+      throw new Error("Could not locate array in batch response.");
     }
-    return parsed;
+    return arr;
   } catch (e) {
     console.error("Failed to parse batch JSON:", jsonString);
     throw new Error(
