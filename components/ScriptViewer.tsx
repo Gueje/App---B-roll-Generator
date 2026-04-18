@@ -144,8 +144,12 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                   )}
                 </>
               ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border-2 border-dashed border-slate-100 dark:border-slate-700 rounded-lg">
-                  No se requiere B-roll para este segmento.
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm border-2 border-dashed border-slate-100 dark:border-slate-700 rounded-lg p-8 text-center space-y-2">
+                  <div className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-900 flex items-center justify-center text-slate-300">
+                    <Wand2 className="w-4 h-4" />
+                  </div>
+                  <p className="italic">Bloque pendiente de generación visual.</p>
+                  <p className="text-[10px] uppercase font-bold text-slate-300 tracking-widest">Usa el botón superior para procesar este bloque</p>
                 </div>
               )}
             </div>

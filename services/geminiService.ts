@@ -205,7 +205,7 @@ export const generateBrollPlan = async (
   }
 
   return segments.map((segment) => {
-    const item = allRawData.find((r: any) => r.segmentId === segment.id);
+    const item = allRawData.find((r: any) => String(r.segmentId) === String(segment.id));
     
     const searchQuery = item?.searchQuery || {};
     const mainQuery = searchQuery.mainQuery || item?.visualIntent || segment.originalText.substring(0, 60) || "stock footage";

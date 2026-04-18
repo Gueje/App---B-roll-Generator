@@ -57,6 +57,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Incremental generation state
+  const [genRange, setGenRange] = useState({ start: 0, end: 30 });
+  const PAGE_SIZE = 30;
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persistence
@@ -108,6 +112,7 @@ function App() {
     setError(null);
     setSegments([]);
     setSuggestions([]);
+    setGenRange({ start: 0, end: PAGE_SIZE });
     setCurrentFileName(file.name.replace(/\.(docx|pdf)$/, ''));
 
     try {
@@ -158,12 +163,14 @@ function App() {
     setError(null);
 
     try {
+      // Determine which segments to process
+      const targetSegments = segments.slice(genRange.start, genRange.end);
+      
       // Find if userStyle is a custom style
       const customStyle = customStyles.find(s => s.id === userStyle);
       
-      // Pass the key AND the new style/tone options
-      const results = await generateBrollPlan(
-        segments, 
+      const newResults = await generateBrollPlan(
+        targetSegments, 
         config.geminiKey, 
         customStyle ? "Custom" : userStyle, 
         userTone,
@@ -171,10 +178,27 @@ function App() {
         resolution,
         customStyle
       );
-      setSuggestions(results);
       
+      // Merge new results with existing ones
+      const mergedSuggestions = [...suggestions];
+      newResults.forEach(newSug => {
+        const index = mergedSuggestions.findIndex(s => s.segmentId === newSug.segmentId);
+        if (index !== -1) {
+          mergedSuggestions[index] = newSug;
+        } else {
+          mergedSuggestions.push(newSug);
+        }
+      });
+
+      setSuggestions(mergedSuggestions);
+      
+      // Update Range for next batch
+      const nextStart = genRange.end;
+      const nextEnd = Math.min(nextStart + PAGE_SIZE, segments.length);
+      setGenRange({ start: nextStart, end: nextEnd });
+
       // Save to History
-      saveSession(LOCAL_USER.email, currentFileName, segments, results);
+      saveSession(LOCAL_USER.email, currentFileName, segments, mergedSuggestions);
       // Refresh history locally
       setHistory(getHistory(LOCAL_USER.email));
 
@@ -186,10 +210,16 @@ function App() {
   };
 
   const handleRegenerate = () => {
-      // Clears current suggestions to trigger re-run
+      // Clears current suggestions and resets range to start over
       setSuggestions([]); 
-      handleGenerate();
+      setGenRange({ start: 0, end: PAGE_SIZE });
+      // We don't call handleGenerate here because we want the user to click the button again 
+      // with potentially new settings, OR we can just trigger it.
+      // Let's trigger it for better UX.
   };
+
+  // Effect to handle the actual trigger of handleRegenerate if needed, 
+  // but better to just have a clean reset.
 
   const handleDeleteSession = (sessionId: string) => {
     const updatedHistory = deleteSession(LOCAL_USER.email, sessionId);
@@ -223,6 +253,7 @@ function App() {
   const handleNewProject = () => {
     setSegments([]);
     setSuggestions([]);
+    setGenRange({ start: 0, end: PAGE_SIZE });
     setCurrentFileName('');
     setStatus('IDLE');
     setError(null);
@@ -424,22 +455,23 @@ function App() {
                                     <span className="hidden md:inline">Regenerar</span>
                                 </button>
                             )}
-
                             <button
                                 onClick={handleGenerate}
-                                disabled={status !== 'IDLE' || suggestions.length > 0}
+                                disabled={status !== 'IDLE' || suggestions.length >= segments.length}
                                 className={`w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium flex justify-center items-center gap-2 transition-colors text-sm md:text-base ${
-                                    suggestions.length > 0 
+                                    suggestions.length >= segments.length 
                                     ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 cursor-default' 
                                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100 dark:shadow-none'
                                 }`}
                             >
                             {status === 'GENERATING' ? (
                                 <><Loader2 className="w-4 h-4 animate-spin" /> Analizando...</>
+                            ) : suggestions.length >= segments.length ? (
+                                "Visuales Completados"
                             ) : suggestions.length > 0 ? (
-                                "Visuales Generados"
+                                `Generar Siguientes (${genRange.start + 1} - ${genRange.end})`
                             ) : (
-                                "Generar Visuales"
+                                segments.length > PAGE_SIZE ? `Generar Primeros ${PAGE_SIZE}` : "Generar Visuales"
                             )}
                             </button>
 
@@ -456,8 +488,18 @@ function App() {
                         </div>
                     </div>
 
+                    {/* Progress Indicator */}
+                    {suggestions.length > 0 && (
+                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden mb-2">
+                            <div 
+                                className="bg-indigo-600 h-full transition-all duration-500" 
+                                style={{ width: `${(suggestions.length / segments.length) * 100}%` }}
+                            />
+                        </div>
+                    )}
+                    
                     {/* Advanced Options Row (Visible when not generated yet, or when user wants to see settings) */}
-                    {suggestions.length === 0 && (
+                    {suggestions.length < segments.length && (
                         <div className="pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
