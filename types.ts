@@ -59,6 +59,20 @@ export interface AppConfig {
   geminiKey: string;
 }
 
+// Global script analysis produced by Step 1 AI call. Used as locked
+// context anchor when generating per-segment B-roll suggestions (Step 2).
+export interface GlobalContext {
+  topic: string;
+  genre: string;
+  era: string;
+  mainEntities: string[];
+  characters: string[];
+  locations: string[];
+  detectedTone: string;
+  detectedStyle: string;
+  keyTerms: string[];
+}
+
 export interface ExportStats {
   totalSegments: number;
   coveredSegments: number;
