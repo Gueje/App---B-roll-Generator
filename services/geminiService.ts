@@ -2,23 +2,24 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, CustomStyle, GlobalContext } from "../types";
 
 // Phase 0.1: Use the latest stable Gemini 2.5 Flash model.
-// The previous ID "gemini-3-flash-preview" was not a valid published model
-// and could be silently resolving to an unintended fallback.
 const MODEL_NAME = "gemini-2.5-flash";
 
-// Generation limits. Gemini 2.5 Flash supports large outputs; we allow
-// enough headroom for long scripts (~150 segments worth of JSON).
+// Token budgets
 const MAX_OUTPUT_TOKENS_ANALYSIS = 2048;
-const MAX_OUTPUT_TOKENS_PLAN = 32768;
-const TEMPERATURE_ANALYSIS = 0.2; // Precise/literal extraction
-const TEMPERATURE_PLAN_DEFAULT = 0.8; // More creative for visual ideation
+// Per-batch budget: smaller window prevents truncation on long scripts.
+const MAX_OUTPUT_TOKENS_BATCH = 8192;
+const TEMPERATURE_ANALYSIS = 0.2;
+const TEMPERATURE_PLAN_DEFAULT = 0.8;
 
-// Helper for waiting/backoff
+// How many segments to send to Gemini in a single call.
+// 20 keeps each batch well within the token budget even for verbose segments.
+const BATCH_SIZE = 20;
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Shared retry wrapper for Gemini calls. Handles 503 overload + 429 rate limit
- * with exponential backoff. Non-recoverable errors are surfaced immediately.
+ * Shared retry wrapper for Gemini calls.
+ * Handles 503 overload + 429 rate-limit with exponential backoff.
  */
 async function callGeminiWithRetry(
   ai: GoogleGenAI,
@@ -64,23 +65,20 @@ async function callGeminiWithRetry(
 }
 
 /**
- * Safely parse a JSON response coming from Gemini. The model is configured
- * with responseMimeType=application/json + responseSchema, so it should be
- * clean JSON — but we defensively strip markdown fences just in case.
+ * Safely parse a JSON response from Gemini.
+ * Strips markdown code fences defensively even though we request application/json.
  */
 function parseJsonResponse(raw: string): any {
   let s = (raw || "").trim();
-  // Strip ```json ... ``` or ``` ... ``` wrappers if present.
   s = s.replace(/^```json\s*/i, "").replace(/^```\s*/i, "");
   s = s.replace(/\s*```\s*$/i, "");
   return JSON.parse(s);
 }
 
 /**
- * PHASE 1 — STEP 1: Global script analysis.
- * Extracts locked metadata (topic, entities, era, tone, etc.) that will be
- * injected as an anchor into Step 2. This is what prevents generic/out-of-context
- * visual suggestions.
+ * STEP 1: Global script analysis.
+ * Extracts locked metadata (topic, entities, era, tone…) that is injected as an
+ * anchor into every Step 2 batch call. This is what prevents generic suggestions.
  */
 export async function analyzeScriptGlobally(
   segments: ScriptSegment[],
@@ -90,12 +88,10 @@ export async function analyzeScriptGlobally(
   const ai = new GoogleGenAI({ apiKey });
 
   const fullScript = segments.map((s) => s.originalText).join("\n\n");
-  // Collect all user-provided bracket notes; these are often editorial cues.
   const notes = segments
     .flatMap((s) => s.notes)
     .filter(Boolean)
     .join(" | ");
-  // Collect extracted URLs as additional grounding hints.
   const links = segments
     .flatMap((s) => s.extractedLinks)
     .map((l) => `[${l.type}] ${l.url}`)
@@ -145,7 +141,7 @@ Now extract the structured metadata.
           era: {
             type: Type.STRING,
             description:
-              "Dominant time period of the story, e.g., '1990s Seattle grunge scene'. 'N/A' if not applicable.",
+              "Dominant time period of the story. 'N/A' if not applicable.",
           },
           mainEntities: {
             type: Type.ARRAY,
@@ -165,19 +161,18 @@ Now extract the structured metadata.
           },
           detectedTone: {
             type: Type.STRING,
-            description:
-              "Narrative tone of the script (informative, emotional, suspenseful, etc.).",
+            description: "Narrative tone (informative, emotional, suspenseful…).",
           },
           detectedStyle: {
             type: Type.STRING,
             description:
-              "Appropriate visual style given the script content (cinematic, documentary, vintage, etc.).",
+              "Appropriate visual style (cinematic, documentary, vintage…).",
           },
           keyTerms: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
             description:
-              "Domain-specific vocabulary from the script that must appear in search queries where relevant.",
+              "Domain-specific vocabulary that must appear in search queries when relevant.",
           },
         },
         required: [
@@ -210,9 +205,140 @@ Now extract the structured metadata.
   }
 }
 
+// ─── Response schema reused for every batch ──────────────────────────────────
+const BROLL_ITEM_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    segmentId: { type: Type.STRING },
+    visualIntent: {
+      type: Type.STRING,
+      description: "Specific shot description anchored to the locked context.",
+    },
+    mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
+    searchQuery: {
+      type: Type.OBJECT,
+      properties: {
+        mainQuery: {
+          type: Type.STRING,
+          description:
+            "2-5 concrete keywords for stock sites (NOT a full sentence).",
+        },
+        youtubeQuery: {
+          type: Type.STRING,
+          description:
+            "YouTube-optimized query with terms like 'archival footage', 'live performance', 'documentary clip'.",
+        },
+        variants: { type: Type.ARRAY, items: { type: Type.STRING } },
+        keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+      },
+      required: ["mainQuery", "youtubeQuery", "keywords", "variants"],
+    },
+    styleParams: {
+      type: Type.OBJECT,
+      properties: {
+        mood: { type: Type.STRING },
+        style: { type: Type.STRING },
+        negativePrompt: { type: Type.STRING },
+      },
+      required: ["mood", "style"],
+    },
+    aiPrompt: {
+      type: Type.STRING,
+      description:
+        "Production-ready generative-video prompt. Include camera, lens, lighting, aspect ratio and resolution.",
+    },
+  },
+  required: [
+    "segmentId",
+    "visualIntent",
+    "mediaType",
+    "searchQuery",
+    "styleParams",
+  ],
+};
+
 /**
- * PHASE 1 — STEP 2: Generate per-segment B-roll suggestions,
- * anchored to the locked GlobalContext from Step 1.
+ * Internal helper: send one batch of segments to Gemini and return raw items.
+ * The system instruction already carries the full GlobalContext anchor so we
+ * do NOT re-send the full script here — that was the source of token bloat.
+ */
+async function generateBatchPlan(
+  ai: GoogleGenAI,
+  batch: ScriptSegment[],
+  systemInstruction: string,
+  customStyle?: CustomStyle
+): Promise<any[]> {
+  const batchPayload = batch.map((s) => ({
+    id: s.id,
+    text: s.originalText,
+    notes: s.notes.join("; "),
+    hintLinks: s.extractedLinks
+      .map((l) => `[${l.type}] ${l.url}`)
+      .join("; "),
+  }));
+
+  const promptText = `${customStyle ? `Apply custom style: ${customStyle.name}\n\n` : ""}Produce ONE B-roll suggestion for EACH of the following ${batch.length} segments. Return exactly ${batch.length} items in the same order, one per id:
+${JSON.stringify(batchPayload, null, 2)}`;
+
+  const contents: any[] = [];
+  if (customStyle?.imageReference) {
+    const match = customStyle.imageReference.match(
+      /^data:(image\/\w+);base64,(.*)$/
+    );
+    if (match) {
+      contents.push({
+        role: "user",
+        parts: [
+          { text: promptText },
+          { inlineData: { mimeType: match[1], data: match[2] } },
+        ],
+      });
+    } else {
+      contents.push({ role: "user", parts: [{ text: promptText }] });
+    }
+  } else {
+    contents.push({ role: "user", parts: [{ text: promptText }] });
+  }
+
+  const response = await callGeminiWithRetry(ai, {
+    model: MODEL_NAME,
+    contents,
+    config: {
+      systemInstruction,
+      temperature: TEMPERATURE_PLAN_DEFAULT,
+      maxOutputTokens: MAX_OUTPUT_TOKENS_BATCH,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: BROLL_ITEM_SCHEMA,
+      },
+    },
+  });
+
+  const jsonString = response?.text;
+  if (!jsonString) throw new Error("Batch returned empty response from Gemini.");
+
+  try {
+    const parsed = parseJsonResponse(jsonString);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Batch response is not an array.");
+    }
+    return parsed;
+  } catch (e) {
+    console.error("Failed to parse batch JSON:", jsonString);
+    throw new Error(
+      "La IA devolvió JSON malformado en un lote. Reintenta la generación."
+    );
+  }
+}
+
+/**
+ * STEP 2: Generate per-segment B-roll suggestions in batches of BATCH_SIZE,
+ * anchored to the GlobalContext produced by Step 1.
+ *
+ * @param onProgress  Optional callback fired at each phase transition.
+ *                    step="analyzing"  → Step 1 in progress
+ *                    step="generating" → Step 2 in progress (ctx + batch info provided)
  */
 export const generateBrollPlan = async (
   segments: ScriptSegment[],
@@ -223,11 +349,16 @@ export const generateBrollPlan = async (
   resolution: string = "4k",
   customStyle?: CustomStyle,
   projectContext?: string,
-  onProgress?: (step: "analyzing" | "generating", context?: GlobalContext) => void
+  onProgress?: (
+    step: "analyzing" | "generating",
+    context?: GlobalContext,
+    batchNum?: number,
+    totalBatches?: number
+  ) => void
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey });
 
-  // --- STEP 1: Global analysis (locked anchor) ---
+  // ── STEP 1: Global analysis ───────────────────────────────────────────────
   onProgress?.("analyzing");
   const globalContext = await analyzeScriptGlobally(
     segments,
@@ -235,9 +366,8 @@ export const generateBrollPlan = async (
     projectContext
   );
   console.log("Global context derived:", globalContext);
-  onProgress?.("generating", globalContext);
 
-  // --- STEP 2: Per-segment generation ---
+  // ── Build system instruction (shared by all batches) ─────────────────────
   const isAutoStyle = userStyle === "Auto-Detect";
   const isAutoTone = userTone === "Auto-Detect";
 
@@ -314,151 +444,39 @@ OUTPUT
 Return a valid JSON array. One object per input segment. Match each object's 'segmentId' to the input 'id'. Do not skip segments.
 `.trim();
 
-  // Build payload: include notes and extractedLinks as hints to the model.
-  const segmentsPayload = segments.map((s) => ({
-    id: s.id,
-    text: s.originalText,
-    notes: s.notes.join("; "),
-    hintLinks: s.extractedLinks
-      .map((l) => `[${l.type}] ${l.url}`)
-      .join("; "),
-  }));
+  // ── STEP 2: Batched generation ────────────────────────────────────────────
+  const batches: ScriptSegment[][] = [];
+  for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+    batches.push(segments.slice(i, i + BATCH_SIZE));
+  }
 
-  const fullScriptForContext = segments.map((s) => s.originalText).join("\n\n");
+  const allRawItems: any[] = [];
 
-  const promptText = `
-${customStyle ? `Apply custom style: ${customStyle.name}` : ""}
-
-FULL SCRIPT (for local-context windowing — read for coherence, do not re-analyze):
-"""
-${fullScriptForContext}
-"""
-
-Now produce ONE B-roll suggestion for EACH of these segments. Return exactly ${segments.length} items, one per id, in the same order:
-${JSON.stringify(segmentsPayload)}
-`;
-
-  const contents: any[] = [];
-
-  if (customStyle?.imageReference) {
-    const match = customStyle.imageReference.match(
-      /^data:(image\/\w+);base64,(.*)$/
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    onProgress?.("generating", globalContext, batchIdx + 1, batches.length);
+    console.log(
+      `Generating batch ${batchIdx + 1}/${batches.length} (${batches[batchIdx].length} segments)`
     );
-    if (match) {
-      contents.push({
-        role: "user",
-        parts: [
-          { text: promptText },
-          { inlineData: { mimeType: match[1], data: match[2] } },
-        ],
-      });
-    } else {
-      contents.push({ role: "user", parts: [{ text: promptText }] });
-    }
-  } else {
-    contents.push({ role: "user", parts: [{ text: promptText }] });
-  }
-
-  const response = await callGeminiWithRetry(ai, {
-    model: MODEL_NAME,
-    contents,
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      temperature: TEMPERATURE_PLAN_DEFAULT,
-      maxOutputTokens: MAX_OUTPUT_TOKENS_PLAN,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            segmentId: { type: Type.STRING },
-            visualIntent: {
-              type: Type.STRING,
-              description:
-                "Specific shot description anchored to the locked context.",
-            },
-            mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
-            searchQuery: {
-              type: Type.OBJECT,
-              properties: {
-                mainQuery: {
-                  type: Type.STRING,
-                  description:
-                    "2-5 concrete keywords for stock sites (NOT a full sentence).",
-                },
-                youtubeQuery: {
-                  type: Type.STRING,
-                  description:
-                    "YouTube-optimized query with terms like 'archival footage', 'live performance', 'documentary clip'.",
-                },
-                variants: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-                keywords: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-              },
-              required: ["mainQuery", "youtubeQuery", "keywords", "variants"],
-            },
-            styleParams: {
-              type: Type.OBJECT,
-              properties: {
-                mood: { type: Type.STRING },
-                style: { type: Type.STRING },
-                negativePrompt: { type: Type.STRING },
-              },
-              required: ["mood", "style"],
-            },
-            aiPrompt: {
-              type: Type.STRING,
-              description:
-                "Production-ready generative-video prompt. Include camera, lens, lighting, aspect ratio and resolution.",
-            },
-          },
-          required: [
-            "segmentId",
-            "visualIntent",
-            "mediaType",
-            "searchQuery",
-            "styleParams",
-          ],
-        },
-      },
-    },
-  });
-
-  const jsonString = response?.text;
-  if (!jsonString) {
-    throw new Error("No response from Gemini");
-  }
-
-  let rawData: any[];
-  try {
-    rawData = parseJsonResponse(jsonString);
-  } catch (e) {
-    console.error("Failed to parse JSON", jsonString);
-    throw new Error(
-      "La IA devolvió JSON malformado. Es posible que la respuesta se haya truncado; intenta con un guion más corto o regenera."
+    const batchResult = await generateBatchPlan(
+      ai,
+      batches[batchIdx],
+      SYSTEM_INSTRUCTION,
+      customStyle
     );
+    allRawItems.push(...batchResult);
   }
 
-  if (!Array.isArray(rawData)) {
-    throw new Error("La IA devolvió un formato inesperado (no es un array).");
-  }
-
-  // Phase 0.3: Coverage validation.
+  // ── Phase 0.3: Coverage validation ───────────────────────────────────────
   const suggestionsById = new Map<string, any>(
-    rawData
+    allRawItems
       .filter((i) => i && typeof i.segmentId === "string")
       .map((i) => [i.segmentId, i])
   );
+
   const missing = segments.filter((s) => !suggestionsById.has(s.id));
   if (missing.length > 0) {
     console.warn(
-      `[Coverage] ${missing.length}/${segments.length} segments missing a suggestion. Missing IDs:`,
+      `[Coverage] ${missing.length}/${segments.length} segments missing a suggestion. IDs:`,
       missing.map((m) => m.id)
     );
   } else {
@@ -467,7 +485,7 @@ ${JSON.stringify(segmentsPayload)}
     );
   }
 
-  // Map to BrollSuggestion in original segment order.
+  // ── Map to BrollSuggestion in original segment order ─────────────────────
   return segments
     .map((seg) => {
       const item = suggestionsById.get(seg.id);
@@ -491,10 +509,7 @@ ${JSON.stringify(segmentsPayload)}
           variants: searchQuery.variants || [],
           keywords: searchQuery.keywords || [],
         },
-        styleParams: item.styleParams || {
-          mood: userTone,
-          style: userStyle,
-        },
+        styleParams: item.styleParams || { mood: userTone, style: userStyle },
         sources: {
           googleImages: `https://www.google.com/search?tbm=isch&q=${queryEncoded}`,
           pexels: `https://www.pexels.com/search/${

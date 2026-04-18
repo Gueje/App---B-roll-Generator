@@ -59,6 +59,7 @@ function App() {
   const [projectContext, setProjectContext] = useState("");
 
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'ANALYZING' | 'GENERATING' | 'EXPORTING'>('IDLE');
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [globalContext, setGlobalContext] = useState<GlobalContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -160,13 +161,15 @@ function App() {
         return;
     }
 
-    setStatus('GENERATING');
+    setStatus('ANALYZING');
+    setBatchProgress(null);
+    setGlobalContext(null);
     setError(null);
 
     try {
       // Find if userStyle is a custom style
       const customStyle = customStyles.find(s => s.id === userStyle);
-      
+
       // Pass the key AND the new style/tone options
       const results = await generateBrollPlan(
         segments,
@@ -177,11 +180,17 @@ function App() {
         resolution,
         customStyle,
         projectContext.trim() || undefined,
-        (step, ctx) => {
-          if (step === 'analyzing') setStatus('ANALYZING');
+        (step, ctx, batchNum, totalBatches) => {
+          if (step === 'analyzing') {
+            setStatus('ANALYZING');
+            setBatchProgress(null);
+          }
           if (step === 'generating') {
             setStatus('GENERATING');
             if (ctx) setGlobalContext(ctx);
+            if (batchNum !== undefined && totalBatches !== undefined) {
+              setBatchProgress({ current: batchNum, total: totalBatches });
+            }
           }
         }
       );
@@ -240,11 +249,12 @@ function App() {
     setCurrentFileName('');
     setStatus('IDLE');
     setError(null);
+    setBatchProgress(null);
+    setGlobalContext(null);
     // Reset options to default
     setUserStyle("Auto-Detect");
     setUserTone("Auto-Detect");
     setProjectContext("");
-    setGlobalContext(null);
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
     }
@@ -432,7 +442,7 @@ function App() {
                             {suggestions.length > 0 && (
                                 <button 
                                     onClick={handleRegenerate}
-                                    disabled={status !== 'IDLE'}
+                                    disabled={status === 'ANALYZING' || status === 'GENERATING'}
                                     className="px-4 py-2.5 rounded-lg font-medium border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 flex items-center justify-center gap-2 text-sm md:text-base transition-colors"
                                     title="Volver a generar con nuevos ajustes"
                                 >
@@ -443,7 +453,7 @@ function App() {
 
                             <button
                                 onClick={handleGenerate}
-                                disabled={status !== 'IDLE' || suggestions.length > 0}
+                                disabled={status === 'ANALYZING' || status === 'GENERATING' || suggestions.length > 0}
                                 className={`w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium flex justify-center items-center gap-2 transition-colors text-sm md:text-base ${
                                     suggestions.length > 0 
                                     ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 cursor-default' 
@@ -451,9 +461,13 @@ function App() {
                                 }`}
                             >
                             {status === 'ANALYZING' ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /><span>Analizando guion... <span className="opacity-60 text-xs">(1/2)</span></span></>
+                                <><Loader2 className="w-4 h-4 animate-spin" /><Brain className="w-4 h-4" /> Analizando guion... (1/2)</>
                             ) : status === 'GENERATING' ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /><span>Generando visuales... <span className="opacity-60 text-xs">(2/2)</span></span></>
+                                <><Loader2 className="w-4 h-4 animate-spin" /><Sparkles className="w-4 h-4" />
+                                {batchProgress
+                                  ? `Generando visuales... lote ${batchProgress.current}/${batchProgress.total}`
+                                  : 'Generando visuales... (2/2)'}
+                                </>
                             ) : suggestions.length > 0 ? (
                                 <><Sparkles className="w-4 h-4" /> Visuales Generados</>
                             ) : (
@@ -474,32 +488,23 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Project Context — upgraded visual design (Phase 1.1) */}
+                    {/* Project Context (free text — the most important anchor for contextual fidelity) */}
                     {suggestions.length === 0 && (
                         <div className="pt-4 border-t border-slate-100 dark:border-slate-700 animate-fade-in">
-                            <div className="bg-gradient-to-br from-indigo-50 to-violet-50 dark:from-indigo-950/40 dark:to-violet-950/40 border border-indigo-200 dark:border-indigo-700/60 rounded-xl p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <div className="w-6 h-6 bg-indigo-600 rounded-md flex items-center justify-center shrink-0">
-                                        <Brain className="w-3.5 h-3.5 text-white" />
-                                    </div>
-                                    <label className="text-sm font-bold text-indigo-800 dark:text-indigo-300">
-                                        Contexto del Proyecto
-                                    </label>
-                                    <span className="ml-auto text-[10px] font-bold uppercase tracking-wide bg-indigo-600 text-white px-2 py-0.5 rounded-full">
-                                        Clave para la calidad
-                                    </span>
-                                </div>
-                                <textarea
-                                    value={projectContext}
-                                    onChange={(e) => setProjectContext(e.target.value)}
-                                    rows={2}
-                                    placeholder="Ej: Video largo sobre la historia de Black Hole Sun de Soundgarden. Tono de ensayo periodístico, con énfasis en la escena grunge de Seattle a principios de los 90."
-                                    className="w-full bg-white/70 dark:bg-slate-900/60 border border-indigo-200 dark:border-indigo-700/50 rounded-lg p-3 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 resize-none placeholder:text-slate-400"
-                                />
-                                <p className="mt-2 text-[11px] text-indigo-600/70 dark:text-indigo-400/70">
-                                    Describe tu video en 1-2 frases. La IA usará esto como ancla para que cada sugerencia visual sea específica de tu tema — no genérica.
-                                </p>
-                            </div>
+                            <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
+                                <MessageSquare className="w-3 h-3" /> Contexto del Proyecto
+                                <span className="ml-1 text-[10px] font-normal normal-case text-slate-400 dark:text-slate-500">(opcional pero MUY recomendado)</span>
+                            </label>
+                            <textarea
+                                value={projectContext}
+                                onChange={(e) => setProjectContext(e.target.value)}
+                                rows={2}
+                                placeholder="Ej: Video largo sobre la historia de Black Hole Sun de Soundgarden. Tono de ensayo periodístico, con énfasis en la escena grunge de Seattle a principios de los 90."
+                                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                            />
+                            <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 italic">
+                                Esta descripción ancla a la IA al tema real de tu video. Reduce drásticamente las sugerencias genéricas o fuera de contexto.
+                            </p>
                         </div>
                     )}
 
@@ -585,34 +590,6 @@ function App() {
                         </div>
                     )}
                 </div>
-
-                {/* Global Context Badge — shows what the AI detected in Step 1 */}
-                {suggestions.length > 0 && globalContext && (
-                    <div className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-slate-950 border border-slate-700 rounded-xl p-4 animate-fade-in">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-400 uppercase tracking-wide w-full mb-1">
-                                <Brain className="w-3.5 h-3.5" />
-                                Contexto Global Detectado por la IA
-                            </div>
-                            <span className="text-xs bg-indigo-900/60 text-indigo-300 border border-indigo-700/50 px-2.5 py-1 rounded-full font-medium">
-                                📌 {globalContext.topic}
-                            </span>
-                            <span className="text-xs bg-slate-700/60 text-slate-300 border border-slate-600/50 px-2.5 py-1 rounded-full">
-                                🎬 {globalContext.genre}
-                            </span>
-                            {globalContext.era && globalContext.era !== 'N/A' && (
-                                <span className="text-xs bg-slate-700/60 text-slate-300 border border-slate-600/50 px-2.5 py-1 rounded-full">
-                                    🕰 {globalContext.era}
-                                </span>
-                            )}
-                            {globalContext.mainEntities.slice(0, 6).map(entity => (
-                                <span key={entity} className="text-xs bg-violet-900/40 text-violet-300 border border-violet-700/40 px-2.5 py-1 rounded-full">
-                                    {entity}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                )}
 
                 <ScriptViewer segments={segments} suggestions={suggestions} />
             </div>
