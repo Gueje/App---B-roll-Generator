@@ -59,6 +59,7 @@ export const generateBrollPlan = async (
 
     **OUTPUT STRUCTURE (JSON):**
     Return a valid JSON array where each object corresponds to a segment.
+    CRITICAL: You MUST return EXACTLY ONE object for EVERY input segment provided. Do NOT skip any segments.
   `;
 
   // Processing payload
@@ -210,18 +211,21 @@ export const generateBrollPlan = async (
       throw new Error("Received malformed JSON from API");
   }
   
-  return rawData.map((item: any) => {
-    const searchQuery = item.searchQuery || {};
-    const mainQuery = searchQuery.mainQuery || item.visualIntent || "stock footage";
+  return segments.map((segment) => {
+    const item = rawData.find((r: any) => r.segmentId === segment.id);
+    
+    const searchQuery = item?.searchQuery || {};
+    const mainQuery = searchQuery.mainQuery || item?.visualIntent || segment.originalText.substring(0, 60) || "stock footage";
     const youtubeQuery = searchQuery.youtubeQuery || mainQuery + " footage";
     
     const queryEncoded = encodeURIComponent(mainQuery);
     const ytQueryEncoded = encodeURIComponent(youtubeQuery);
     
-    const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE';
+    const mediaType = item?.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE';
 
     return {
-      ...item,
+      segmentId: segment.id,
+      visualIntent: item?.visualIntent || `Visual representativo de: ${segment.originalText.substring(0, 50)}...`,
       mediaType,
       searchQuery: {
           mainQuery: mainQuery,
@@ -229,7 +233,8 @@ export const generateBrollPlan = async (
           variants: searchQuery.variants || [],
           keywords: searchQuery.keywords || []
       },
-      styleParams: item.styleParams || { mood: userTone, style: userStyle },
+      styleParams: item?.styleParams || { mood: userTone, style: userStyle },
+      aiPrompt: item?.aiPrompt || `${mainQuery}. Cinematic, 4k, aspect ratio ${aspectRatio}.`,
       sources: {
         googleImages: `https://www.google.com/search?tbm=isch&q=${queryEncoded}`,
         pexels: `https://www.pexels.com/search/${mediaType === 'VIDEO' ? 'videos/' : ''}${queryEncoded}`,
