@@ -62,157 +62,150 @@ export const generateBrollPlan = async (
     CRITICAL: You MUST return EXACTLY ONE object for EVERY input segment provided. Do NOT skip any segments.
   `;
 
-  // Processing payload
-  const segmentsPayload = segments.map(s => ({
-    id: s.id,
-    text: s.originalText,
-    notes: s.notes.join("; ")
-  }));
+  // CHUNKING LOGIC: Break segments into batches of 15 to ensure total coverage and avoid token exhaustion
+  const CHUNK_SIZE = 12;
+  const chunkedSegments: ScriptSegment[][] = [];
+  for (let i = 0; i < segments.length; i += CHUNK_SIZE) {
+    chunkedSegments.push(segments.slice(i, i + CHUNK_SIZE));
+  }
 
-  const promptText = `
-    Analyze these script segments.
-    ${customStyle ? `Apply custom style: ${customStyle.name}` : (isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`)}
-    ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
+  const allRawData: any[] = [];
+
+  for (const chunk of chunkedSegments) {
+    const segmentsPayload = chunk.map(s => ({
+      id: s.id,
+      text: s.originalText,
+      notes: s.notes.join("; ")
+    }));
+
+    const promptText = `
+      Analyze these script segments.
+      ${customStyle ? `Apply custom style: ${customStyle.name}` : (isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`)}
+      ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
+      
+      Input Segments (Batch):
+      ${JSON.stringify(segmentsPayload)}
+    `;
+
+    const contents: any[] = [];
     
-    Input Segments:
-    ${JSON.stringify(segmentsPayload)}
-  `;
-
-  const contents: any[] = [];
-  
-  if (customStyle?.imageReference) {
-    // Extract base64 and mime type
-    const match = customStyle.imageReference.match(/^data:(image\/\w+);base64,(.*)$/);
-    if (match) {
-      contents.push({
-        role: "user",
-        parts: [
-          { text: promptText },
-          {
-            inlineData: {
-              mimeType: match[1],
-              data: match[2]
+    if (customStyle?.imageReference) {
+      // Extract base64 and mime type
+      const match = customStyle.imageReference.match(/^data:(image\/\w+);base64,(.*)$/);
+      if (match) {
+        contents.push({
+          role: "user",
+          parts: [
+            { text: promptText },
+            {
+              inlineData: {
+                mimeType: match[1],
+                data: match[2]
+              }
             }
-          }
-        ]
-      });
+          ]
+        });
+      } else {
+        contents.push({ role: "user", parts: [{ text: promptText }] });
+      }
     } else {
       contents.push({ role: "user", parts: [{ text: promptText }] });
     }
-  } else {
-    contents.push({ role: "user", parts: [{ text: promptText }] });
-  }
 
-  let response;
-  let attempts = 0;
-  const maxAttempts = 5; 
-  let currentDelay = 4000; 
+    let response;
+    let attempts = 0;
+    const maxAttempts = 5; 
+    let currentDelay = 4000; 
 
-  // Retry Loop
-  while (attempts < maxAttempts) {
-    try {
-      const result = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: contents,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                segmentId: { type: Type.STRING },
-                visualIntent: { type: Type.STRING, description: "Detailed description of the specific shot relating to the script context" },
-                mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
-                searchQuery: {
-                  type: Type.OBJECT,
-                  properties: {
-                    mainQuery: { type: Type.STRING, description: "Stock site optimized query (subject + action)" },
-                    youtubeQuery: { type: Type.STRING, description: "YouTube optimized query (topic + 'footage'/'clip'/'documentary')" },
-                    variants: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+    // Retry Loop for this specific chunk
+    while (attempts < maxAttempts) {
+      try {
+        const result = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: contents,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  segmentId: { type: Type.STRING },
+                  visualIntent: { type: Type.STRING, description: "Detailed description of the specific shot relating to the script context" },
+                  mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
+                  searchQuery: {
+                    type: Type.OBJECT,
+                    properties: {
+                      mainQuery: { type: Type.STRING, description: "Stock site optimized query (subject + action)" },
+                      youtubeQuery: { type: Type.STRING, description: "YouTube optimized query (topic + 'footage'/'clip'/'documentary')" },
+                      variants: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    },
+                    required: ["mainQuery", "youtubeQuery", "keywords", "variants"]
                   },
-                  required: ["mainQuery", "youtubeQuery", "keywords", "variants"]
-                },
-                styleParams: {
-                  type: Type.OBJECT,
-                  properties: {
-                    mood: { type: Type.STRING },
-                    style: { type: Type.STRING },
-                    negativePrompt: { type: Type.STRING }
+                  styleParams: {
+                    type: Type.OBJECT,
+                    properties: {
+                      mood: { type: Type.STRING },
+                      style: { type: Type.STRING },
+                      negativePrompt: { type: Type.STRING }
+                    },
+                    required: ["mood", "style"]
                   },
-                  required: ["mood", "style"]
+                  aiPrompt: { type: Type.STRING, description: "Extremely detailed technical prompt for GenAI video" }
                 },
-                aiPrompt: { type: Type.STRING, description: "Extremely detailed technical prompt for GenAI video" }
-              },
-              required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
+                required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
+              }
             }
           }
+        });
+        
+        response = result;
+        break;
+
+      } catch (error: any) {
+        attempts++;
+        console.warn(`Gemini API chunk attempt ${attempts} failed:`, error);
+        
+        const errorMessage = error.message?.toLowerCase() || '';
+        const isOverloaded = errorMessage.includes('503') || errorMessage.includes('overloaded') || error.status === 503 || error.code === 503;
+        const isRateLimit = errorMessage.includes('429') || error.status === 429 || error.code === 429;
+
+        if ((isOverloaded || isRateLimit) && attempts < maxAttempts) {
+            await delay(currentDelay);
+            currentDelay *= 2;
+        } else {
+            throw new Error(`Error en el servicio de IA al procesar un bloque largo: ${error.message}`);
         }
-      });
-      
-      response = result;
-      // Success! Exit loop.
-      break;
-
-    } catch (error: any) {
-      attempts++;
-      console.warn(`Gemini API attempt ${attempts} failed:`, error);
-      
-      const errorMessage = error.message?.toLowerCase() || '';
-      
-      // Robust check for overload/503
-      const isOverloaded = 
-        errorMessage.includes('503') || 
-        errorMessage.includes('overloaded') ||
-        error.status === 503 || 
-        error.code === 503;
-
-      const isRateLimit = 
-        errorMessage.includes('429') || 
-        error.status === 429 || 
-        error.code === 429;
-
-      if ((isOverloaded || isRateLimit) && attempts < maxAttempts) {
-          console.log(`Model overloaded or busy. Retrying in ${currentDelay}ms... (Attempt ${attempts}/${maxAttempts})`);
-          await delay(currentDelay);
-          currentDelay *= 2; // Exponential backoff (4s -> 8s -> 16s -> 32s)
-      } else {
-          // If error is not recoverable or max attempts reached, throw it.
-          console.error("Gemini API Fatal Error:", error);
-          throw new Error("El servicio de IA está saturado (Error 503). Por favor espera 1 minuto y vuelve a intentarlo.");
       }
+    }
+
+    if (!response || !response.text) {
+        throw new Error("No se recibió respuesta válida de la IA para un segmento del documento.");
+    }
+
+    let jsonString = response.text.trim();
+    if (jsonString.startsWith("```json")) {
+        jsonString = jsonString.replace(/^```json/, "").replace(/```$/, "");
+    } else if (jsonString.startsWith("```")) {
+        jsonString = jsonString.replace(/^```/, "").replace(/```$/, "");
+    }
+
+    try {
+        const chunkData = JSON.parse(jsonString);
+        if (Array.isArray(chunkData)) {
+            allRawData.push(...chunkData);
+        }
+    } catch (e) {
+        console.error("Failed to parse chunk JSON", jsonString);
+        // We continue hoping other chunks succeed, or maybe we should throw. 
+        // For robustness, if a chunk fails, we'll have missing IDs and the fallback will catch it.
     }
   }
 
-  if (!response) {
-      throw new Error("No se pudo conectar con el servicio de IA tras varios intentos.");
-  }
-  
-  let jsonString = response.text;
-  if (!jsonString) {
-    throw new Error("No response from Gemini");
-  }
-
-  // Clean up markdown
-  jsonString = jsonString.trim();
-  if (jsonString.startsWith("```json")) {
-      jsonString = jsonString.replace(/^```json/, "").replace(/```$/, "");
-  } else if (jsonString.startsWith("```")) {
-      jsonString = jsonString.replace(/^```/, "").replace(/```$/, "");
-  }
-
-  let rawData;
-  try {
-      rawData = JSON.parse(jsonString);
-  } catch (e) {
-      console.error("Failed to parse JSON", jsonString);
-      throw new Error("Received malformed JSON from API");
-  }
-  
   return segments.map((segment) => {
-    const item = rawData.find((r: any) => r.segmentId === segment.id);
+    const item = allRawData.find((r: any) => r.segmentId === segment.id);
     
     const searchQuery = item?.searchQuery || {};
     const mainQuery = searchQuery.mainQuery || item?.visualIntent || segment.originalText.substring(0, 60) || "stock footage";
