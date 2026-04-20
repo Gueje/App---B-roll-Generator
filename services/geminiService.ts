@@ -71,7 +71,17 @@ export const generateBrollPlan = async (
 
   const allRawData: any[] = [];
 
-  for (const chunk of chunkedSegments) {
+  // GLOBAL CONTEXT: Use the first 3 segments to establish the theme for ALL chunks
+  const globalContext = segments.slice(0, 3).map(s => s.originalText).join(" ");
+
+  for (let i = 0; i < chunkedSegments.length; i++) {
+    const chunk = chunkedSegments[i];
+    
+    // Continuity: Get previous few segments if not the first chunk
+    const previousContext = i > 0 
+        ? segments.slice(Math.max(0, i * CHUNK_SIZE - 3), i * CHUNK_SIZE).map(s => s.originalText).join(" ")
+        : "";
+
     const segmentsPayload = chunk.map(s => ({
       id: s.id,
       text: s.originalText,
@@ -79,11 +89,21 @@ export const generateBrollPlan = async (
     }));
 
     const promptText = `
-      Analyze these script segments.
+      **OVERALL SCRIPT THEME (CONTEXT):**
+      "${globalContext}"
+
+      ${previousContext ? `**PREVIOUS SEGMENTS (FOR CONTINUITY):**\n"${previousContext}"` : ""}
+
+      **TASK:**
+      Analyze these specific script segments and provide RIGOROUS visual suggestions.
+      Every search query MUST include the specific subject/entity mentioned in the context.
+      DO NOT provide generic office shots if the script is about a "Creative Studio".
+      DO NOT provide generic money shots if the script is about "Ethereum".
+
       ${customStyle ? `Apply custom style: ${customStyle.name}` : (isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`)}
       ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
       
-      Input Segments (Batch):
+      Input Segments to Process (Batch):
       ${JSON.stringify(segmentsPayload)}
     `;
 
