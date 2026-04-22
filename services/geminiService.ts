@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types";
 
-const MODEL_NAME = "gemini-3-flash-preview"; 
+const MODEL_NAME = "gemini-1.5-flash"; 
 
 // Helper for waiting/backoff
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -134,8 +134,8 @@ export const generateBrollPlan = async (
 
     let response;
     let attempts = 0;
-    const maxAttempts = 5; 
-    let currentDelay = 4000; 
+    const maxAttempts = 7; 
+    let currentDelay = 3000; 
 
     // Retry Loop for this specific chunk
     while (attempts < maxAttempts) {
@@ -186,17 +186,18 @@ export const generateBrollPlan = async (
 
       } catch (error: any) {
         attempts++;
-        console.warn(`Gemini API chunk attempt ${attempts} failed:`, error);
+        const errorMessage = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+        const errorCode = error.status || error.code || 0;
         
-        const errorMessage = error.message?.toLowerCase() || '';
-        const isOverloaded = errorMessage.includes('503') || errorMessage.includes('overloaded') || error.status === 503 || error.code === 503;
-        const isRateLimit = errorMessage.includes('429') || error.status === 429 || error.code === 429;
+        const isOverloaded = errorMessage.includes('503') || errorMessage.includes('overloaded') || errorCode === 503;
+        const isRateLimit = errorMessage.includes('429') || errorCode === 429;
 
         if ((isOverloaded || isRateLimit) && attempts < maxAttempts) {
+            console.warn(`Gemini API busy (Attempt ${attempts}/${maxAttempts}). Retrying in ${currentDelay}ms...`);
             await delay(currentDelay);
-            currentDelay *= 2;
+            currentDelay *= 2; // Exponential backoff
         } else {
-            throw new Error(`Error en el servicio de IA al procesar un bloque largo: ${error.message}`);
+            throw new Error(`Error en el servicio de IA: ${error.message || 'Servidor no disponible'}. Por favor, reintenta en un momento.`);
         }
       }
     }
