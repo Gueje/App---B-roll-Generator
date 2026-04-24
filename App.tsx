@@ -648,8 +648,9 @@ function App() {
 
         {/* Version Badge for Deployment Verification */}
         <div className="fixed bottom-4 right-4 z-50">
-            <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono">
-                v2.3 - Global Context Anchor
+            <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                v2.4 - Pro Context + Flash Batches
             </div>
         </div>
       </div>
