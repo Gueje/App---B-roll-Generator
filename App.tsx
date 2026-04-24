@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-// Deploy Version: 2.1.2 - Chunking & Paging Active
+// Deploy Version: 2.2.0 - Stable Subject-Centric Rigor
 import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
@@ -8,7 +8,7 @@ import HowToGuide from './components/HowToGuide';
 import CustomStyleModal from './components/CustomStyleModal';
 import { parseDocx } from './services/docxService';
 import { parsePdf } from './services/pdfService';
-import { generateBrollPlan } from './services/geminiService';
+import { generateBrollPlan, getGlobalContext } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
 import { saveSession, getHistory, deleteSession } from './services/historyService';
 import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
@@ -41,6 +41,8 @@ function App() {
   const [segments, setSegments] = useState<ScriptSegment[]>([]);
   const [suggestions, setSuggestions] = useState<BrollSuggestion[]>([]);
   const [currentFileName, setCurrentFileName] = useState<string>('');
+  const [globalContext, setGlobalContext] = useState<string>('');
+  const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
   
   const [customStyles, setCustomStyles] = useState<CustomStyle[]>(() => {
     const saved = localStorage.getItem('br_customStyles');
@@ -132,6 +134,20 @@ function App() {
       
       setSegments(parsedSegments);
       setStatus('IDLE');
+
+      // NEW: Generate Global Visual Context immediately
+      if (config.geminiKey) {
+        setIsAnalyzingContext(true);
+        const fullText = parsedSegments.map(s => s.originalText).join(" ");
+        try {
+          const context = await getGlobalContext(fullText, config.geminiKey);
+          setGlobalContext(context);
+        } catch (err) {
+          console.error("Context analysis failed", err);
+        } finally {
+          setIsAnalyzingContext(false);
+        }
+      }
     } catch (err: any) {
       setError(err.message || "Error al leer el archivo");
       setStatus('IDLE');
@@ -177,7 +193,8 @@ function App() {
         userTone,
         aspectRatio,
         resolution,
-        customStyle
+        customStyle,
+        globalContext // Pass the anchor here
       );
       
       // Merge new results with existing ones
@@ -359,6 +376,29 @@ function App() {
                 <AlertCircle className="w-5 h-5 shrink-0" />
                 {error}
             </div>
+            )}
+
+            {/* Global Context Indicator */}
+            {globalContext && segments.length > 0 && (
+                <div className="mb-6 bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/50 p-4 rounded-xl animate-fade-in">
+                    <div className="flex items-start gap-3">
+                        <div className="bg-indigo-600 p-1.5 rounded-lg text-white mt-0.5">
+                            <Monitor className="w-4 h-4" />
+                        </div>
+                        <div>
+                            <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">Ancla de Contexto Visual</h3>
+                            <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">"{globalContext}"</p>
+                            <p className="text-[10px] text-slate-500 mt-1 italic">Este contexto se usa para mantener la CRITICIDAD y RIGOR en cada búsqueda visual.</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAnalyzingContext && (
+                <div className="mb-6 flex items-center justify-center gap-3 py-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 animate-pulse">
+                    <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+                    <span className="text-sm text-slate-500 font-medium font-mono">Analizando rigor del guion...</span>
+                </div>
             )}
 
             {/* Empty State / Upload */}
@@ -609,7 +649,7 @@ function App() {
         {/* Version Badge for Deployment Verification */}
         <div className="fixed bottom-4 right-4 z-50">
             <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono">
-                v2.1 - Etapas de 30
+                v2.3 - Global Context Anchor
             </div>
         </div>
       </div>

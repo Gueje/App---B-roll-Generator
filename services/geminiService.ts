@@ -3,8 +3,32 @@ import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types
 
 const MODEL_NAME = "gemini-1.5-flash"; 
 
-// Helper for waiting/backoff
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+export const getGlobalContext = async (
+  fullText: string,
+  apiKey: string
+): Promise<string> => {
+  const genAI = new GoogleGenAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+  
+  const prompt = `
+    Analyze this video script and provide a brief (max 2 lines) visual context.
+    Tell me what is the main subject and the core visual theme.
+    Example: "A documentary about the crypto market focusing on Bitcoin, using futuristic and high-tech visuals."
+    
+    SCRIPT:
+    ${fullText.substring(0, 5000)}
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim();
+  } catch (err) {
+    console.error("Context analysis failed", err);
+    return "Generic stock footage style.";
+  }
+};
 
 export const generateBrollPlan = async (
   segments: ScriptSegment[],
@@ -13,138 +37,63 @@ export const generateBrollPlan = async (
   userTone: string = "Auto-Detect",
   aspectRatio: string = "16:9",
   resolution: string = "4k",
-  customStyle?: CustomStyle
+  customStyle?: CustomStyle,
+  providedContext?: string // Accept external context
 ): Promise<BrollSuggestion[]> => {
-  const ai = new GoogleGenAI({ apiKey: apiKey });
-
-  // If Auto-Detect is selected, we instruction the model to perform analysis first.
-  const isAutoStyle = userStyle === "Auto-Detect";
-  const isAutoTone = userTone === "Auto-Detect";
-
-  const styleInstruction = customStyle 
-    ? `USE THIS CUSTOM STYLE INSTRUCTION: ${customStyle.instruction}` 
-    : (isAutoStyle ? "YOU MUST DECIDE THE BEST STYLE based on the script content." : userStyle);
-
-  const SYSTEM_INSTRUCTION = `
-    You are an Elite Visual Director for high-end documentary and commercial video production. 
-    You are NOT a basic stock searcher. You are a CONTEXTUAL RESEARCHER.
-
-    **GLOBAL OBJECTIVE:**
-    Analyze the ENTIRE SCRIPT to understand the specific subject matter (e.g., "The History of Bitcoin", "Climate Change in 2024", "A specific Wedding").
+  const genAI = new GoogleGenAI(apiKey);
+  const model = genAI.getGenerativeModel({ 
+    model: MODEL_NAME,
+    systemInstruction: `You are a Professional Film Director and Visual Researcher. 
+    Your mission is to provide RIGOROUS and contextually relevant visual plans for a script.
     
-    **STRICTNESS RULES (CRITICAL):**
-    1. **NO GENERIC METAPHORS:** If the script says "It changed everything" in the context of Bitcoin, DO NOT suggest a "man looking at sunrise". Suggest "Bitcoin price chart skyrocketing on a monitor".
-    2. **SUBJECT CONSISTENCY:** Every single visual suggestion MUST contain the main subject of the script. If the script is about dogs, do not show a generic "happy family" unless a dog is present.
-    3. **CONTEXT IS KING:** Look at the surrounding segments. If Segment 1 mentions "1980s", Segment 2 must visually reflect the 1980s even if the text doesn't explicitly say "1980s".
+    STRICT RULES:
+    1. SUBJECT RIGOR: Every 'mainQuery' and 'youtubeQuery' MUST include the specific subject of the script. NO generic metaphors.
+    2. CONTEXTUAL ACCURACY: Analyze the theme and ensure every visual reinforces the specific topic (e.g. if script is about "Bitcoin", don't just show "coins", show "Bitcoin charts" or "Satoshi mentioned").
+    3. NO FILLER: DO NOT provide generic office/business shots unless explicitly required by context.
+    4. DATA INTEGRITY: You MUST return a valid JSON array where each object matches the requested schema precisely.`
+  });
 
-    **USER CONFIGURATION:**
-    - **Visual Style:** ${styleInstruction}
-    - **Narrative Tone:** ${isAutoTone ? "YOU MUST DECIDE THE BEST TONE based on the script content." : userTone}
-    - **Aspect Ratio:** ${aspectRatio}
-    - **Resolution:** ${resolution}
-
-    **YOUTUBE SEARCH LOGIC:**
-    - You must generate a specific 'youtubeQuery'.
-    - YouTube queries are different from Stock queries.
-    - Stock: "Bitcoin golden coin on table"
-    - YouTube: "Bitcoin history documentary footage 2009", "Satoshi Nakamoto explained clip", "News anchor talking about Bitcoin crash".
-    - Use terms like: "documentary clip", "archival footage", "interview", "news report", "scene", "gameplay" (if gaming).
-
-    **VIDEO PROMPT ENGINEERING (HOLLYWOOD STANDARD):**
-    - If Media Type is VIDEO, the 'aiPrompt' must be production-ready.
-    - Include: Camera Movement (Dolly, Pan, Truck), Lens (35mm, Anamorphic), Lighting (Rembrandt, Neon, Natural), and Action.
-    - IMPORTANT: Always include the Aspect Ratio (${aspectRatio}) and Resolution (${resolution}) in the 'aiPrompt'.
-    - If a reference image is provided, replicate its style, density, and texture exactly in the 'aiPrompt'.
-    - Example: "Close-up of a vintage computer monitor displaying green code. Slow dolly in. Dusty room, shaft of sunlight hitting the screen. Aspect Ratio ${aspectRatio}, Resolution ${resolution}, cinematic."
-
-    **OUTPUT STRUCTURE (JSON):**
-    Return a valid JSON array where each object corresponds to a segment.
-    CRITICAL: You MUST return EXACTLY ONE object for EVERY input segment provided. Do NOT skip any segments.
-  `;
-
-  // CHUNKING LOGIC: Break segments into batches of 15 to ensure total coverage and avoid token exhaustion
-  const CHUNK_SIZE = 12;
-  const chunkedSegments: ScriptSegment[][] = [];
+  // Small chunk size ensures higher reliability and avoids token/timeout issues
+  const CHUNK_SIZE = 8;
+  const chunkedSegments = [];
   for (let i = 0; i < segments.length; i += CHUNK_SIZE) {
     chunkedSegments.push(segments.slice(i, i + CHUNK_SIZE));
   }
 
   const allRawData: any[] = [];
-
-  // GLOBAL CONTEXT: Use the first 3 segments to establish the theme for ALL chunks
-  const globalContext = segments.slice(0, 3).map(s => s.originalText).join(" ");
+  // Use provided context or fall back to deriving it
+  const finalContext = providedContext || segments.slice(0, 3).map(s => s.originalText).join(" ");
 
   for (let i = 0; i < chunkedSegments.length; i++) {
     const chunk = chunkedSegments[i];
+    // Continuity context from the previous few segments
+    const prevContext = i > 0 ? segments.slice(Math.max(0, i * CHUNK_SIZE - 2), i * CHUNK_SIZE).map(s => s.originalText).join(" ") : "";
     
-    // Continuity: Get previous few segments if not the first chunk
-    const previousContext = i > 0 
-        ? segments.slice(Math.max(0, i * CHUNK_SIZE - 3), i * CHUNK_SIZE).map(s => s.originalText).join(" ")
-        : "";
-
-    const segmentsPayload = chunk.map(s => ({
-      id: s.id,
-      text: s.originalText,
-      notes: s.notes.join("; ")
-    }));
-
-    const promptText = `
-      **OVERALL SCRIPT THEME (CONTEXT):**
-      "${globalContext}"
-
-      ${previousContext ? `**PREVIOUS SEGMENTS (FOR CONTINUITY):**\n"${previousContext}"` : ""}
-
-      **TASK:**
-      Analyze these specific script segments and provide RIGOROUS visual suggestions.
-      Every search query MUST include the specific subject/entity mentioned in the context.
-      DO NOT provide generic office shots if the script is about a "Creative Studio".
-      DO NOT provide generic money shots if the script is about "Ethereum".
-
-      ${customStyle ? `Apply custom style: ${customStyle.name}` : (isAutoStyle ? "Determine the best visual style yourself." : `Apply style: ${userStyle}`)}
-      ${isAutoTone ? "Determine the best tone yourself." : `Apply tone: ${userTone}`}
+    const prompt = `
+      GLOBAL VISUAL DIRECTION: "${finalContext}"
+      ${prevContext ? `PREVIOUS CONTEXT (FOR CONTINUITY): "${prevContext}"` : ""}
       
-      Input Segments to Process (Batch):
-      ${JSON.stringify(segmentsPayload)}
+      USER PREFERENCES:
+      - Requested Style: ${customStyle ? customStyle.instruction : userStyle}
+      - Narrative Tone: ${userTone}
+      - Visual Specs: ${aspectRatio}, ${resolution}
+      
+      TASK: Generate visual suggestions for the following script segments.
+      REMEMBER: Be specific. Use the main subject in every search query.
+      
+      SEGMENTS TO PROCESS:
+      ${JSON.stringify(chunk.map(s => ({ id: s.id, text: s.originalText })))}
     `;
 
-    const contents: any[] = [];
-    
-    if (customStyle?.imageReference) {
-      // Extract base64 and mime type
-      const match = customStyle.imageReference.match(/^data:(image\/\w+);base64,(.*)$/);
-      if (match) {
-        contents.push({
-          role: "user",
-          parts: [
-            { text: promptText },
-            {
-              inlineData: {
-                mimeType: match[1],
-                data: match[2]
-              }
-            }
-          ]
-        });
-      } else {
-        contents.push({ role: "user", parts: [{ text: promptText }] });
-      }
-    } else {
-      contents.push({ role: "user", parts: [{ text: promptText }] });
-    }
-
-    let response;
     let attempts = 0;
-    const maxAttempts = 7; 
-    let currentDelay = 3000; 
+    const maxAttempts = 5;
+    let success = false;
 
-    // Retry Loop for this specific chunk
-    while (attempts < maxAttempts) {
+    while (attempts < maxAttempts && !success) {
       try {
-        const result = await ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: contents,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
+        const result = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.ARRAY,
@@ -152,109 +101,62 @@ export const generateBrollPlan = async (
                 type: Type.OBJECT,
                 properties: {
                   segmentId: { type: Type.STRING },
-                  visualIntent: { type: Type.STRING, description: "Detailed description of the specific shot relating to the script context" },
+                  visualIntent: { type: Type.STRING },
                   mediaType: { type: Type.STRING, enum: ["VIDEO", "IMAGE"] },
                   searchQuery: {
                     type: Type.OBJECT,
                     properties: {
-                      mainQuery: { type: Type.STRING, description: "Stock site optimized query (subject + action)" },
-                      youtubeQuery: { type: Type.STRING, description: "YouTube optimized query (topic + 'footage'/'clip'/'documentary')" },
-                      variants: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      mainQuery: { type: Type.STRING },
+                      youtubeQuery: { type: Type.STRING }
                     },
-                    required: ["mainQuery", "youtubeQuery", "keywords", "variants"]
+                    required: ["mainQuery", "youtubeQuery"]
                   },
-                  styleParams: {
-                    type: Type.OBJECT,
-                    properties: {
-                      mood: { type: Type.STRING },
-                      style: { type: Type.STRING },
-                      negativePrompt: { type: Type.STRING }
-                    },
-                    required: ["mood", "style"]
-                  },
-                  aiPrompt: { type: Type.STRING, description: "Extremely detailed technical prompt for GenAI video" }
+                  aiPrompt: { type: Type.STRING }
                 },
-                required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "styleParams"]
+                required: ["segmentId", "visualIntent", "mediaType", "searchQuery", "aiPrompt"]
               }
             }
           }
         });
-        
-        response = result;
-        break;
 
-      } catch (error: any) {
+        const text = result.response.text();
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) {
+          allRawData.push(...data);
+          success = true;
+        }
+      } catch (err: any) {
         attempts++;
-        const errorMessage = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-        const errorCode = error.status || error.code || 0;
-        
-        const isOverloaded = errorMessage.includes('503') || errorMessage.includes('overloaded') || errorCode === 503;
-        const isRateLimit = errorMessage.includes('429') || errorCode === 429;
-
-        if ((isOverloaded || isRateLimit) && attempts < maxAttempts) {
-            console.warn(`Gemini API busy (Attempt ${attempts}/${maxAttempts}). Retrying in ${currentDelay}ms...`);
-            await delay(currentDelay);
-            currentDelay *= 2; // Exponential backoff
-        } else {
-            throw new Error(`Error en el servicio de IA: ${error.message || 'Servidor no disponible'}. Por favor, reintenta en un momento.`);
-        }
+        console.error(`Chunk ${i} failed. Attempt ${attempts}/${maxAttempts}. Error:`, err.message);
+        await delay(2500 * attempts); // Exponential backoff with delay
       }
-    }
-
-    if (!response || !response.text) {
-        throw new Error("No se recibió respuesta válida de la IA para un segmento del documento.");
-    }
-
-    let jsonString = response.text.trim();
-    if (jsonString.startsWith("```json")) {
-        jsonString = jsonString.replace(/^```json/, "").replace(/```$/, "");
-    } else if (jsonString.startsWith("```")) {
-        jsonString = jsonString.replace(/^```/, "").replace(/```$/, "");
-    }
-
-    try {
-        const chunkData = JSON.parse(jsonString);
-        if (Array.isArray(chunkData)) {
-            allRawData.push(...chunkData);
-        }
-    } catch (e) {
-        console.error("Failed to parse chunk JSON", jsonString);
-        // We continue hoping other chunks succeed, or maybe we should throw. 
-        // For robustness, if a chunk fails, we'll have missing IDs and the fallback will catch it.
     }
   }
 
-  return segments.map((segment) => {
-    const item = allRawData.find((r: any) => String(r.segmentId) === String(segment.id));
+  // Map results back to original segments with robust fallbacks
+  return segments.map(segment => {
+    const found = allRawData.find(r => String(r.segmentId) === String(segment.id));
+    const mainQuery = found?.searchQuery?.mainQuery || segment.originalText.substring(0, 60);
+    const ytQuery = found?.searchQuery?.youtubeQuery || mainQuery;
     
-    const searchQuery = item?.searchQuery || {};
-    const mainQuery = searchQuery.mainQuery || item?.visualIntent || segment.originalText.substring(0, 60) || "stock footage";
-    const youtubeQuery = searchQuery.youtubeQuery || mainQuery + " footage";
-    
-    const queryEncoded = encodeURIComponent(mainQuery);
-    const ytQueryEncoded = encodeURIComponent(youtubeQuery);
-    
-    const mediaType = item?.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE';
-
     return {
       segmentId: segment.id,
-      visualIntent: item?.visualIntent || `Visual representativo de: ${segment.originalText.substring(0, 50)}...`,
-      mediaType,
+      visualIntent: found?.visualIntent || `Visual representativo de: ${segment.originalText.substring(0, 50)}...`,
+      mediaType: found?.mediaType || "VIDEO",
       searchQuery: {
-          mainQuery: mainQuery,
-          youtubeQuery: youtubeQuery,
-          variants: searchQuery.variants || [],
-          keywords: searchQuery.keywords || []
+        mainQuery,
+        youtubeQuery: ytQuery,
+        variants: [],
+        keywords: []
       },
-      styleParams: item?.styleParams || { mood: userTone, style: userStyle },
-      aiPrompt: item?.aiPrompt || `${mainQuery}. Cinematic, 4k, aspect ratio ${aspectRatio}.`,
+      styleParams: { mood: userTone, style: userStyle },
+      aiPrompt: found?.aiPrompt || `${mainQuery}, cinematic 4k, ${aspectRatio}`,
       sources: {
-        googleImages: `https://www.google.com/search?tbm=isch&q=${queryEncoded}`,
-        pexels: `https://www.pexels.com/search/${mediaType === 'VIDEO' ? 'videos/' : ''}${queryEncoded}`,
-        unsplash: `https://unsplash.com/s/photos/${queryEncoded}`,
-        pinterest: `https://www.pinterest.com/search/pins/?q=${queryEncoded}`,
-        youtube: `https://www.youtube.com/results?search_query=${ytQueryEncoded}`
+        googleImages: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(mainQuery)}`,
+        pexels: `https://www.pexels.com/search/videos/${encodeURIComponent(mainQuery)}`,
+        unsplash: `https://unsplash.com/s/photos/${encodeURIComponent(mainQuery)}`,
+        pinterest: `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(mainQuery)}`,
+        youtube: `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}`
       }
     } as BrollSuggestion;
   });
