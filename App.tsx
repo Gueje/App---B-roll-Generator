@@ -43,6 +43,9 @@ function App() {
   const [currentFileName, setCurrentFileName] = useState<string>('');
   const [globalContext, setGlobalContext] = useState<string>('');
   const [isAnalyzingContext, setIsAnalyzingContext] = useState(false);
+  const [isEditingContext, setIsEditingContext] = useState(false);
+  const [isContextApproved, setIsContextApproved] = useState(false);
+  const [contextDraft, setContextDraft] = useState('');
   
   const [customStyles, setCustomStyles] = useState<CustomStyle[]>(() => {
     const saved = localStorage.getItem('br_customStyles');
@@ -138,10 +141,12 @@ function App() {
       // NEW: Generate Global Visual Context immediately
       if (config.geminiKey) {
         setIsAnalyzingContext(true);
+        setIsContextApproved(false);
         const fullText = parsedSegments.map(s => s.originalText).join(" ");
         try {
           const context = await getGlobalContext(fullText, config.geminiKey);
           setGlobalContext(context);
+          setContextDraft(context);
         } catch (err) {
           console.error("Context analysis failed", err);
         } finally {
@@ -273,6 +278,9 @@ function App() {
     setSuggestions([]);
     setGenRange({ start: 0, end: PAGE_SIZE });
     setCurrentFileName('');
+    setGlobalContext('');
+    setIsContextApproved(false);
+    setIsEditingContext(false);
     setStatus('IDLE');
     setError(null);
     // Reset options to default
@@ -380,16 +388,95 @@ function App() {
 
             {/* Global Context Indicator */}
             {globalContext && segments.length > 0 && (
-                <div className="mb-6 bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/50 p-4 rounded-xl animate-fade-in">
-                    <div className="flex items-start gap-3">
-                        <div className="bg-indigo-600 p-1.5 rounded-lg text-white mt-0.5">
-                            <Monitor className="w-4 h-4" />
+                <div className={`mb-6 transition-all duration-300 border rounded-xl animate-fade-in ${
+                    isContextApproved 
+                    ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-900/30' 
+                    : 'bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/50'
+                }`}>
+                    <div className="p-4">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-start gap-3 flex-1">
+                                <div className={`${isContextApproved ? 'bg-emerald-600' : 'bg-indigo-600'} p-1.5 rounded-lg text-white mt-0.5 shrink-0`}>
+                                    <Monitor className="w-4 h-4" />
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h3 className={`text-xs font-bold uppercase tracking-wider ${isContextApproved ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                            Ancla de Contexto Visual
+                                        </h3>
+                                        {isContextApproved && (
+                                            <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full font-bold">
+                                                APROBADO
+                                            </span>
+                                        )}
+                                    </div>
+                                    
+                                    {isEditingContext ? (
+                                        <textarea
+                                            value={contextDraft}
+                                            onChange={(e) => setContextDraft(e.target.value)}
+                                            className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 min-h-[60px]"
+                                            placeholder="Escribe el tema maestro del guion..."
+                                        />
+                                    ) : (
+                                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium leading-relaxed">
+                                            "{globalContext}"
+                                        </p>
+                                    )}
+                                    
+                                    {!isEditingContext && (
+                                        <p className="text-[10px] text-slate-500 mt-1 italic">
+                                            Este contexto asegura que cada sugerencia visual mantenga la coherencia con el "tema maestro".
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col gap-2 shrink-0">
+                                {isEditingContext ? (
+                                    <button 
+                                        onClick={() => {
+                                            setGlobalContext(contextDraft);
+                                            setIsEditingContext(false);
+                                            setIsContextApproved(true);
+                                        }}
+                                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                                    >
+                                        Guardar
+                                    </button>
+                                ) : (
+                                    <div className="flex flex-row md:flex-col gap-2">
+                                        {!isContextApproved && (
+                                            <button 
+                                                onClick={() => setIsContextApproved(true)}
+                                                className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1"
+                                            >
+                                                Aprobar
+                                            </button>
+                                        )}
+                                        <button 
+                                            onClick={() => {
+                                                setIsEditingContext(true);
+                                                setContextDraft(globalContext);
+                                                setIsContextApproved(false);
+                                            }}
+                                            className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+                                        >
+                                            {isContextApproved ? 'Ajustar' : 'Editar'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">Ancla de Contexto Visual</h3>
-                            <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">"{globalContext}"</p>
-                            <p className="text-[10px] text-slate-500 mt-1 italic">Este contexto se usa para mantener la CRITICIDAD y RIGOR en cada búsqueda visual.</p>
-                        </div>
+                        
+                        {!isContextApproved && !isEditingContext && (
+                            <div className="mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-900/50 flex items-center gap-2">
+                                <AlertCircle className="w-3.5 h-3.5 text-indigo-500" />
+                                <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                                    Confirma el contexto antes de generar para mejores resultados.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

@@ -14,11 +14,12 @@ export const getGlobalContext = async (
   const ai = new GoogleGenAI({ apiKey });
   
   const prompt = `
-    Analyze this video script and provide a brief (max 2 lines) visual context.
-    CRITICAL: Identify the EXACT main subject and the core visual style.
-    Example: "A documentary about 'X' focusing on 'Y', using 'Z' visuals."
+    Analiza este guion de video y proporciona un breve contexto visual (máximo 2 líneas).
+    CRITICIDAD: Identifica el sujeto exacto y el estilo visual principal.
+    Responde ÚNICAMENTE en ESPAÑOL.
+    Ejemplo: "Un documental sobre 'X' enfocado en 'Y', usando visuales tipo 'Z'."
     
-    SCRIPT:
+    GUION:
     ${fullText.substring(0, 8000)}
   `;
 
