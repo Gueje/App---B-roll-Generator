@@ -15,6 +15,7 @@ export const getGlobalContext = async (
   
   const prompt = `
     Analiza este guion de video y proporciona un breve contexto visual (máximo 2 líneas).
+    Usa Google Search para verificar si los términos o sujetos mencionados son reales y obtén su descripción visual exacta.
     CRITICIDAD: Identifica el sujeto exacto y el estilo visual principal.
     Responde ÚNICAMENTE en ESPAÑOL.
     Ejemplo: "Un documental sobre 'X' enfocado en 'Y', usando visuales tipo 'Z'."
@@ -24,21 +25,23 @@ export const getGlobalContext = async (
   `;
 
   try {
+    // Enable Grounding with Google Search for the MASTER analysis
     const response = await ai.models.generateContent({
       model: PRO_MODEL,
       contents: prompt,
+      tools: [{ googleSearch: {} }] // External Grounding enabled
     });
-    return response.text?.trim() || "Generic documentary style.";
+    return response.text?.trim() || "Estilo documental profesional.";
   } catch (err) {
-    console.error("Context analysis failed with Pro, falling back to Flash", err);
+    console.error("Pro analysis with grounding failed, falling back to Flash", err);
     try {
         const response = await ai.models.generateContent({
             model: FLASH_MODEL,
             contents: prompt,
         });
-        return response.text?.trim() || "Generic documentary style.";
+        return response.text?.trim() || "Estilo documental genérico.";
     } catch (innerErr) {
-        return "Generic subject in professional style.";
+        return "Sujeto profesional en estilo cinematográfico.";
     }
   }
 };
