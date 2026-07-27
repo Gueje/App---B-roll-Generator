@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 // Deploy Version: 2.2.0 - Stable Subject-Centric Rigor
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -14,7 +14,7 @@ import { saveSession, getHistory, deleteSession } from './services/historyServic
 import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
 const INITIAL_CONFIG: AppConfig = {
-  geminiKey: localStorage.getItem('br_geminiKey') || '',
+  geminiKey: localStorage.getItem('br_geminiKey') || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '',
 };
 
 // Hardcoded local user for history tracking
@@ -95,6 +95,40 @@ function App() {
     setHistory(loadedHistory);
   }, []);
 
+  const analyzeContextWithAI = async (keyToUse?: string, currentSegments?: ScriptSegment[]) => {
+    const targetSegs = currentSegments || segments;
+    if (targetSegs.length === 0) return;
+
+    const apiKey = keyToUse || config.geminiKey || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+
+    setIsAnalyzingContext(true);
+    setError(null);
+    const fullText = targetSegs.map(s => s.originalText).join(" ");
+    
+    // Set fallback draft if empty
+    const fallbackText = targetSegs.slice(0, 3).map(s => s.originalText).join(" ");
+    if (!globalContext) {
+      setGlobalContext(fallbackText);
+      setContextDraft(fallbackText);
+    }
+
+    if (!apiKey) {
+      setIsAnalyzingContext(false);
+      return;
+    }
+
+    try {
+      const context = await getGlobalContext(fullText, apiKey);
+      setGlobalContext(context);
+      setContextDraft(context);
+      setIsContextApproved(false);
+    } catch (err: any) {
+      console.error("Error al analizar contexto con IA:", err);
+    } finally {
+      setIsAnalyzingContext(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
     let file: File | undefined;
     
@@ -138,20 +172,16 @@ function App() {
       setSegments(parsedSegments);
       setStatus('IDLE');
 
-      // NEW: Generate Global Visual Context immediately
-      if (config.geminiKey) {
-        setIsAnalyzingContext(true);
-        setIsContextApproved(false);
-        const fullText = parsedSegments.map(s => s.originalText).join(" ");
-        try {
-          const context = await getGlobalContext(fullText, config.geminiKey);
-          setGlobalContext(context);
-          setContextDraft(context);
-        } catch (err) {
-          console.error("Context analysis failed", err);
-        } finally {
-          setIsAnalyzingContext(false);
-        }
+      // Immediate visual context anchor so panel is ALWAYS visible upon script load
+      const fallbackText = parsedSegments.slice(0, 3).map(s => s.originalText).join(" ");
+      setGlobalContext(fallbackText);
+      setContextDraft(fallbackText);
+      setIsContextApproved(false);
+
+      // Trigger AI Analysis in background if API key exists
+      const apiKey = config.geminiKey || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+      if (apiKey) {
+        analyzeContextWithAI(apiKey, parsedSegments);
       }
     } catch (err: any) {
       setError(err.message || "Error al leer el archivo");
@@ -387,7 +417,7 @@ function App() {
             )}
 
             {/* Global Context Indicator */}
-            {globalContext && segments.length > 0 && (
+            {segments.length > 0 && (
                 <div className={`mb-6 transition-all duration-300 border rounded-xl animate-fade-in ${
                     isContextApproved 
                     ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-900/30' 
@@ -404,27 +434,38 @@ function App() {
                                         <h3 className={`text-xs font-bold uppercase tracking-wider ${isContextApproved ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
                                             Ancla de Contexto Visual
                                         </h3>
-                                        {isContextApproved && (
-                                            <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full font-bold">
-                                                APROBADO
+                                        {isContextApproved ? (
+                                            <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                                <Check className="w-3 h-3" /> APROBADO
+                                            </span>
+                                        ) : (
+                                            <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-bold">
+                                                PENDIENTE DE REVISIÓN
                                             </span>
                                         )}
                                     </div>
                                     
-                                    {isEditingContext ? (
-                                        <textarea
-                                            value={contextDraft}
-                                            onChange={(e) => setContextDraft(e.target.value)}
-                                            className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 min-h-[60px]"
-                                            placeholder="Escribe el tema maestro del guion..."
-                                        />
+                                    {isAnalyzingContext ? (
+                                        <div className="flex items-center gap-2 py-2 text-indigo-600 dark:text-indigo-400 text-sm font-medium animate-pulse">
+                                            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                                            <span>Analizando tema maestro del guion con IA Gemini Pro...</span>
+                                        </div>
+                                    ) : isEditingContext ? (
+                                        <div className="mt-1">
+                                            <textarea
+                                                value={contextDraft}
+                                                onChange={(e) => setContextDraft(e.target.value)}
+                                                className="w-full bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-2.5 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 min-h-[70px] leading-relaxed"
+                                                placeholder="Escribe el tema maestro del guion..."
+                                            />
+                                        </div>
                                     ) : (
-                                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium leading-relaxed">
-                                            "{globalContext}"
+                                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium leading-relaxed mt-0.5">
+                                            "{globalContext || 'Sin contexto definido.'}"
                                         </p>
                                     )}
                                     
-                                    {!isEditingContext && (
+                                    {!isEditingContext && !isAnalyzingContext && (
                                         <p className="text-[10px] text-slate-500 mt-1 italic">
                                             Este contexto asegura que cada sugerencia visual mantenga la coherencia con el "tema maestro".
                                         </p>
@@ -434,24 +475,35 @@ function App() {
 
                             <div className="flex flex-col gap-2 shrink-0">
                                 {isEditingContext ? (
-                                    <button 
-                                        onClick={() => {
-                                            setGlobalContext(contextDraft);
-                                            setIsEditingContext(false);
-                                            setIsContextApproved(true);
-                                        }}
-                                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-                                    >
-                                        Guardar
-                                    </button>
+                                    <div className="flex flex-col gap-1.5">
+                                        <button 
+                                            onClick={() => {
+                                                setGlobalContext(contextDraft);
+                                                setIsEditingContext(false);
+                                                setIsContextApproved(true);
+                                            }}
+                                            className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-1"
+                                        >
+                                            <Check className="w-3.5 h-3.5" /> Guardar
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setContextDraft(globalContext);
+                                                setIsEditingContext(false);
+                                            }}
+                                            className="px-3 py-1 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-lg hover:bg-slate-300 transition-colors"
+                                        >
+                                            Cancelar
+                                        </button>
+                                    </div>
                                 ) : (
-                                    <div className="flex flex-row md:flex-col gap-2">
+                                    <div className="flex flex-col gap-1.5">
                                         {!isContextApproved && (
                                             <button 
                                                 onClick={() => setIsContextApproved(true)}
-                                                className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1"
+                                                className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                             >
-                                                Aprobar
+                                                <Check className="w-3.5 h-3.5" /> Aprobar
                                             </button>
                                         )}
                                         <button 
@@ -460,31 +512,35 @@ function App() {
                                                 setContextDraft(globalContext);
                                                 setIsContextApproved(false);
                                             }}
-                                            className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+                                            className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                         >
+                                            <Sparkles className="w-3 h-3 text-indigo-500" />
                                             {isContextApproved ? 'Ajustar' : 'Editar'}
                                         </button>
+
+                                        {!isAnalyzingContext && (
+                                            <button 
+                                                onClick={() => analyzeContextWithAI()}
+                                                title="Volver a analizar con IA"
+                                                className="px-2 py-1 text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center justify-center gap-1"
+                                            >
+                                                <RefreshCw className="w-3 h-3" /> Re-analizar con IA
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
                         </div>
                         
-                        {!isContextApproved && !isEditingContext && (
+                        {!isContextApproved && !isEditingContext && !isAnalyzingContext && (
                             <div className="mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-900/50 flex items-center gap-2">
-                                <AlertCircle className="w-3.5 h-3.5 text-indigo-500" />
+                                <AlertCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                                 <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
                                     Confirma el contexto antes de generar para mejores resultados.
                                 </p>
                             </div>
                         )}
                     </div>
-                </div>
-            )}
-
-            {isAnalyzingContext && (
-                <div className="mb-6 flex items-center justify-center gap-3 py-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 animate-pulse">
-                    <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
-                    <span className="text-sm text-slate-500 font-medium font-mono">Analizando rigor del guion...</span>
                 </div>
             )}
 

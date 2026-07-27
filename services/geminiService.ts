@@ -29,7 +29,9 @@ export const getGlobalContext = async (
     const response = await ai.models.generateContent({
       model: PRO_MODEL,
       contents: prompt,
-      tools: [{ googleSearch: {} }] // External Grounding enabled
+      config: {
+        tools: [{ googleSearch: {} }] // External Grounding enabled
+      }
     });
     return response.text?.trim() || "Estilo documental profesional.";
   } catch (err) {
