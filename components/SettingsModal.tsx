@@ -48,6 +48,24 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, config, onSave }) => 
             />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Requerida para el análisis de los guiones.</p>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Modelo de Gemini</label>
+            <select
+              className="w-full border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md p-2 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+              value={localConfig.preferredModel || "Auto"}
+              onChange={(e) => setLocalConfig({ ...localConfig, preferredModel: e.target.value })}
+            >
+              <option value="Auto">✨ Automático (Conmutación inteligente ante alta demanda)</option>
+              <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash (Recomendado - Ultra estable sin caídas 503)</option>
+              <option value="gemini-flash-latest">🚀 Gemini Flash Latest</option>
+              <option value="gemini-3.8-flash">🔥 Gemini 3.8 Flash</option>
+              <option value="gemini-3.1-flash-lite">🌱 Gemini 3.1 Flash Lite</option>
+            </select>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Si un modelo sufre picos de demanda (Error 503), el modo Automático conmuta instantáneamente a otro modelo disponible.
+            </p>
+          </div>
         </div>
 
         <div className="mt-8 flex justify-end gap-3">

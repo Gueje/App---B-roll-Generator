@@ -57,6 +57,7 @@ export interface CustomStyle {
 
 export interface AppConfig {
   geminiKey: string;
+  preferredModel?: string;
 }
 
 export interface ExportStats {

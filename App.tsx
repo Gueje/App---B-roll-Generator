@@ -8,13 +8,14 @@ import HowToGuide from './components/HowToGuide';
 import CustomStyleModal from './components/CustomStyleModal';
 import { parseDocx } from './services/docxService';
 import { parsePdf } from './services/pdfService';
-import { generateBrollPlan, getGlobalContext } from './services/geminiService';
+import { generateBrollPlan, getGlobalContext, cleanErrorMessage } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
 import { saveSession, getHistory, deleteSession } from './services/historyService';
 import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
 const INITIAL_CONFIG: AppConfig = {
   geminiKey: localStorage.getItem('br_geminiKey') || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '',
+  preferredModel: localStorage.getItem('br_preferredModel') || 'Auto',
 };
 
 // Hardcoded local user for history tracking
@@ -80,6 +81,9 @@ function App() {
   // Persistence
   useEffect(() => {
     localStorage.setItem('br_geminiKey', config.geminiKey);
+    if (config.preferredModel) {
+      localStorage.setItem('br_preferredModel', config.preferredModel);
+    }
   }, [config]);
 
   useEffect(() => {
@@ -132,7 +136,7 @@ function App() {
     }
 
     try {
-      const context = await getGlobalContext(fullText, apiKey);
+      const context = await getGlobalContext(fullText, apiKey, config.preferredModel);
       // Only apply if user hasn't approved or changed in the meantime and runId matches
       if (analysisRunId.current === currentRunId && !isContextApprovedRef.current) {
         setGlobalContext(context);
@@ -140,6 +144,7 @@ function App() {
       }
     } catch (err: any) {
       console.error("Error al analizar contexto con IA:", err);
+      setError(cleanErrorMessage(err));
     } finally {
       if (analysisRunId.current === currentRunId) {
         setIsAnalyzingContext(false);
@@ -253,7 +258,8 @@ function App() {
         aspectRatio,
         resolution,
         customStyle,
-        globalContext
+        globalContext,
+        config.preferredModel
       );
       
       // Merge new results with existing ones
@@ -287,7 +293,7 @@ function App() {
       setHistory(getHistory(LOCAL_USER.email));
 
     } catch (err: any) {
-      setError(err.message || "Falló la generación con IA");
+      setError(cleanErrorMessage(err));
     } finally {
       setStatus('IDLE');
     }
@@ -439,19 +445,26 @@ function App() {
 
             {/* Error Banner */}
             {error && (
-            <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in text-sm md:text-base">
-                <div className="flex items-center gap-3">
-                    <AlertCircle className="w-5 h-5 shrink-0" />
-                    <span>{error}</span>
+            <div className="mb-6 bg-red-50 dark:bg-red-900/25 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3.5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in text-sm shadow-sm">
+                <div className="flex items-center gap-3 flex-1">
+                    <AlertCircle className="w-5 h-5 shrink-0 text-red-600 dark:text-red-400" />
+                    <span className="font-medium leading-relaxed">{error}</span>
                 </div>
-                {(error.includes("cuota") || error.includes("429") || error.includes("API Key") || error.includes("ajustes")) && (
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-red-200 dark:border-red-800">
+                    <button
+                        onClick={handleGenerate}
+                        disabled={status === 'GENERATING'}
+                        className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                    >
+                        <RotateCcw className="w-3.5 h-3.5" /> Reintentar Lote
+                    </button>
                     <button
                         onClick={() => setIsSettingsOpen(true)}
-                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg shrink-0 transition-colors"
+                        className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-xs font-semibold rounded-lg transition-colors"
                     >
-                        Configurar API Key
+                        Cambiar Modelo / Clave
                     </button>
-                )}
+                </div>
             </div>
             )}
 

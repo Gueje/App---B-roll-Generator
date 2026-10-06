@@ -1,18 +1,59 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types";
 
-// Standard model from skill definitions (fast, high RPM quota, prevents Pro quota exhaustion)
-const FLASH_MODEL = "gemini-3.8-flash"; 
+// Resilient pool of high-capacity models with automatic failover
+// gemini-2.5-flash has the largest dedicated server allocation globally and rarely suffers 503 spikes
+export const AVAILABLE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite"
+];
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Cleanly extracts a human-friendly message from Gemini API errors,
+ * stripping raw JSON objects like {"error":{"code":503,...}}
+ */
+export const cleanErrorMessage = (error: any): string => {
+  if (!error) return "Error desconocido al comunicarse con la IA.";
+  const rawMsg = typeof error === "string" ? error : String(error.message || JSON.stringify(error));
+
+  if (rawMsg.includes("503") || rawMsg.includes("high demand") || rawMsg.includes("UNAVAILABLE") || rawMsg.includes("overloaded")) {
+    return "Los servidores de Google Gemini están experimentando una alta demanda momentánea (Error 503: Spikes in demand). La aplicación cambiará de modelo automáticamente; por favor pulsa 'Reintentar Lote'.";
+  }
+
+  if (rawMsg.includes("429") || rawMsg.includes("RESOURCE_EXHAUSTED") || rawMsg.includes("quota") || rawMsg.includes("rate limit")) {
+    return "Se ha alcanzado temporalmente el límite de cuota por minuto de la API (Error 429). Por favor espera 30-45 segundos antes de generar el siguiente lote.";
+  }
+
+  if (rawMsg.includes("API key not valid") || rawMsg.includes("API_KEY_INVALID")) {
+    return "La API Key de Gemini configurada no es válida. Por favor revísala en Configuración.";
+  }
+
+  // Attempt to parse nested JSON if present
+  try {
+    const jsonMatch = rawMsg.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.error?.message) {
+        return parsed.error.message;
+      }
+    }
+  } catch {}
+
+  return rawMsg;
+};
+
+/**
  * Generates a concise visual master context (max 2 lines) in Spanish.
- * Uses gemini-3.8-flash with Google Search grounding if possible, or fallback without tools.
+ * Iterates through candidate models if 503 or 429 occurs.
  */
 export const getGlobalContext = async (
   fullText: string,
-  apiKey: string
+  apiKey: string,
+  preferredModel?: string
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey });
   
@@ -27,29 +68,40 @@ GUION:
 ${fullText.substring(0, 8000)}
   `;
 
-  try {
-    // Attempt with Google Search grounding to verify real subjects/entities
-    const response = await ai.models.generateContent({
-      model: FLASH_MODEL,
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }]
-      }
-    });
-    return response.text?.trim() || "Documental temático con enfoque cinematográfico y metraje de archivo.";
-  } catch (err) {
-    console.warn("Search-grounded context analysis unavailable, falling back to direct analysis", err);
+  const modelsToTry = preferredModel && preferredModel !== "Auto"
+    ? [preferredModel, ...AVAILABLE_MODELS.filter(m => m !== preferredModel)]
+    : AVAILABLE_MODELS;
+
+  for (const model of modelsToTry) {
     try {
+      // First attempt with Google Search grounding if possible
       const response = await ai.models.generateContent({
-        model: FLASH_MODEL,
+        model,
         contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
       });
-      return response.text?.trim() || "Documental temático con enfoque cinematográfico y metraje de archivo.";
-    } catch (innerErr: any) {
-      console.error("Direct context analysis failed", innerErr);
-      return "Documental temático con enfoque cinematográfico y metraje de archivo.";
+      if (response.text?.trim()) {
+        return response.text.trim();
+      }
+    } catch (err: any) {
+      // If tools aren't supported or 503 occurs, try direct content generation without tools
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
+        if (response.text?.trim()) {
+          return response.text.trim();
+        }
+      } catch (innerErr: any) {
+        console.warn(`Context generation with model ${model} failed, trying next candidate...`, innerErr?.message);
+      }
     }
   }
+
+  return "Documental temático con enfoque cinematográfico y metraje de archivo contextual.";
 };
 
 /**
@@ -72,7 +124,6 @@ const synthesizeVisualFallback = (text: string, masterContext: string): { mainQu
     .slice(0, 4)
     .join(' ');
 
-  // Extract primary subject noun phrase from master context (first 4 words)
   const masterSubject = masterContext
     .replace(/[^\w\sáéíóúñ]/g, ' ')
     .split(/\s+/)
@@ -80,7 +131,7 @@ const synthesizeVisualFallback = (text: string, masterContext: string): { mainQu
     .join(' ') || 'documental b-roll';
 
   const mainQuery = `${masterSubject} ${cleanWords || 'archivo metraje cinematografico'}`.trim();
-  const ytQuery = `${masterSubject} b-roll metraje metraje historico`.trim();
+  const ytQuery = `${masterSubject} b-roll metraje historico`.trim();
   const intent = `Toma cinematográfica representativa vinculada a ${masterSubject}`;
 
   return { mainQuery, ytQuery, intent };
@@ -94,13 +145,13 @@ export const generateBrollPlan = async (
   aspectRatio: string = "16:9",
   resolution: string = "4k",
   customStyle?: CustomStyle,
-  providedContext?: string 
+  providedContext?: string,
+  preferredModel?: string
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey });
 
-  // Optimal chunk size: 15 segments.
-  // 30 segments = 2 calls instead of 4, cutting RPM usage in half while keeping token size comfortably within Flash limits.
-  const CHUNK_SIZE = 15;
+  // Chunk size: 10 segments provides optimal balance between payload size, token latency, and RPM consumption.
+  const CHUNK_SIZE = 10;
   const chunkedSegments: ScriptSegment[][] = [];
   for (let i = 0; i < segments.length; i += CHUNK_SIZE) {
     chunkedSegments.push(segments.slice(i, i + CHUNK_SIZE));
@@ -113,10 +164,17 @@ export const generateBrollPlan = async (
     ? providedContext.trim()
     : "Documental con metraje cinematográfico de alta calidad y archivo contextual.";
 
+  // Candidate models pool with auto-rotation
+  const modelsPool = preferredModel && preferredModel !== "Auto"
+    ? [preferredModel, ...AVAILABLE_MODELS.filter(m => m !== preferredModel)]
+    : AVAILABLE_MODELS;
+
+  let currentModelIndex = 0;
+
   for (let i = 0; i < chunkedSegments.length; i++) {
     const chunk = chunkedSegments[i];
     
-    // Previous narrative context for smooth visual continuity
+    // Continuity context from previous segments
     const prevContext = i > 0 
       ? segments.slice(Math.max(0, i * CHUNK_SIZE - 2), i * CHUNK_SIZE).map(s => s.originalText).join(" ") 
       : "";
@@ -163,14 +221,16 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
    - Devuelve un array JSON que coincida exactamente con el esquema especificado para cada segmento.`;
 
     let attempts = 0;
-    const maxAttempts = 4;
+    const maxAttempts = 5;
     let success = false;
     let lastError: any = null;
 
     while (attempts < maxAttempts && !success) {
+      const activeModel = modelsPool[currentModelIndex % modelsPool.length];
+
       try {
         const response = await ai.models.generateContent({
-          model: FLASH_MODEL,
+          model: activeModel,
           contents: prompt,
           config: {
             systemInstruction,
@@ -205,45 +265,57 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
         if (Array.isArray(data)) {
           allRawData.push(...data);
           success = true;
-          // Pacing delay between successful chunks (1500ms) to prevent hitting RPM limits
+          // Pacing delay between successful chunks
           if (i < chunkedSegments.length - 1) {
-            await delay(1500);
+            await delay(1200);
           }
         }
       } catch (err: any) {
         attempts++;
         lastError = err;
         const errMsg = String(err.message || "");
-        const isQuota = errMsg.includes("429") || 
-                        errMsg.includes("RESOURCE_EXHAUSTED") || 
-                        errMsg.includes("quota") || 
-                        errMsg.includes("rate limit") ||
-                        err.status === 429;
-        const isServerBusy = errMsg.includes("503") || errMsg.includes("overloaded");
-
-        // Progressive backoff: on quota (429), wait substantially longer to allow the per-minute window to reset
-        const pauseTime = isQuota 
-          ? Math.min(6000 * attempts, 25000) 
-          : isServerBusy 
-            ? 5000 * attempts 
-            : 2500 * attempts;
         
-        console.warn(`Lote ${i + 1}/${chunkedSegments.length} intento ${attempts} falló (${errMsg}). Esperando ${pauseTime}ms antes de reintentar...`);
+        const is503HighDemand = errMsg.includes("503") || 
+                               errMsg.includes("high demand") || 
+                               errMsg.includes("UNAVAILABLE") || 
+                               errMsg.includes("overloaded");
+                               
+        const isQuota429 = errMsg.includes("429") || 
+                           errMsg.includes("RESOURCE_EXHAUSTED") || 
+                           errMsg.includes("quota") || 
+                           errMsg.includes("rate limit") ||
+                           err.status === 429;
+
+        // CRITICAL AUTO-FAILOVER:
+        // If 503 high demand or overloaded, immediately switch to the next model in the pool!
+        if (is503HighDemand) {
+          currentModelIndex++;
+          const nextModel = modelsPool[currentModelIndex % modelsPool.length];
+          console.warn(`[Auto-Failover] Modelo ${activeModel} en alta demanda (503). Conmutando inmediatamente al modelo alternativo: ${nextModel}...`);
+          // Brief pause before trying alternative model
+          await delay(1500);
+          continue;
+        }
+
+        // On quota 429, wait with progressive backoff and try next model
+        if (isQuota429) {
+          currentModelIndex++;
+          const pauseTime = Math.min(5000 * attempts, 20000);
+          console.warn(`[Quota 429] Límite por minuto alcanzado. Pausando ${pauseTime}ms y conmutando modelo...`);
+          await delay(pauseTime);
+          continue;
+        }
+
+        // Other errors: standard backoff
+        const pauseTime = 2000 * attempts;
+        console.warn(`Lote ${i + 1}/${chunkedSegments.length} intento ${attempts} falló (${errMsg}). Reintentando en ${pauseTime}ms...`);
         await delay(pauseTime);
       }
     }
 
     if (!success) {
-      const errMsg = String(lastError?.message || "");
-      if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota")) {
-        throw new Error(
-          "Límite de cuota alcanzado (Error 429 - Rate Limit). La API de Gemini necesita un momento para restablecer su cuota por minuto. Por favor espera 30-45 segundos y vuelve a pulsar el botón para continuar con este lote."
-        );
-      } else {
-        throw new Error(
-          `No se pudo completar el lote de visuales tras varios reintentos: ${errMsg || "Error de conexión con la IA"}.`
-        );
-      }
+      const friendlyMsg = cleanErrorMessage(lastError);
+      throw new Error(`No se pudo completar el lote de visuales: ${friendlyMsg}`);
     }
   }
 
@@ -254,7 +326,6 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
     // Synthesize fallback visual query if anything is missing - NEVER fall back to literal raw narrator text
     const fallback = synthesizeVisualFallback(segment.originalText, finalContext);
 
-    // Validate that mainQuery does not literally equal the narrative segment
     let mainQuery = found?.searchQuery?.mainQuery?.trim() || fallback.mainQuery;
     let ytQuery = found?.searchQuery?.youtubeQuery?.trim() || fallback.ytQuery;
 
