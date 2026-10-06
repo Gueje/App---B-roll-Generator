@@ -6,7 +6,9 @@ export const saveSession = (
   userEmail: string, 
   scriptName: string, 
   segments: ScriptSegment[], 
-  suggestions: BrollSuggestion[]
+  suggestions: BrollSuggestion[],
+  globalContext?: string,
+  isContextApproved?: boolean
 ) => {
   if (!userEmail) return;
 
@@ -15,7 +17,9 @@ export const saveSession = (
     date: new Date().toISOString(),
     scriptName,
     segments,
-    suggestions
+    suggestions,
+    globalContext,
+    isContextApproved
   };
 
   const key = `${HISTORY_KEY_PREFIX}${userEmail}`;

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-// Deploy Version: 2.2.0 - Stable Subject-Centric Rigor
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw } from 'lucide-react';
+// Deploy Version: 2.5.0 - Strict Subject Rigor, Context Lock & Flash Model Quota Protection
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw, Lock } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -46,6 +46,14 @@ function App() {
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [isContextApproved, setIsContextApproved] = useState(false);
   const [contextDraft, setContextDraft] = useState('');
+  
+  // Guard references to ensure approved context is NEVER overwritten by async background tasks
+  const isContextApprovedRef = useRef(false);
+  const analysisRunId = useRef(0);
+
+  useEffect(() => {
+    isContextApprovedRef.current = isContextApproved;
+  }, [isContextApproved]);
   
   const [customStyles, setCustomStyles] = useState<CustomStyle[]>(() => {
     const saved = localStorage.getItem('br_customStyles');
@@ -99,6 +107,12 @@ function App() {
     const targetSegs = currentSegments || segments;
     if (targetSegs.length === 0) return;
 
+    // Never re-analyze or overwrite if user already approved or locked the context
+    if (isContextApprovedRef.current) {
+      return;
+    }
+
+    const currentRunId = ++analysisRunId.current;
     const apiKey = keyToUse || config.geminiKey || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
 
     setIsAnalyzingContext(true);
@@ -119,13 +133,17 @@ function App() {
 
     try {
       const context = await getGlobalContext(fullText, apiKey);
-      setGlobalContext(context);
-      setContextDraft(context);
-      setIsContextApproved(false);
+      // Only apply if user hasn't approved or changed in the meantime and runId matches
+      if (analysisRunId.current === currentRunId && !isContextApprovedRef.current) {
+        setGlobalContext(context);
+        setContextDraft(context);
+      }
     } catch (err: any) {
       console.error("Error al analizar contexto con IA:", err);
     } finally {
-      setIsAnalyzingContext(false);
+      if (analysisRunId.current === currentRunId) {
+        setIsAnalyzingContext(false);
+      }
     }
   };
 
@@ -154,6 +172,12 @@ function App() {
     setSuggestions([]);
     setGenRange({ start: 0, end: PAGE_SIZE });
     setCurrentFileName(file.name.replace(/\.(docx|pdf)$/, ''));
+    
+    // Reset context approvals for the new file
+    analysisRunId.current += 1;
+    isContextApprovedRef.current = false;
+    setIsContextApproved(false);
+    setIsEditingContext(false);
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -176,7 +200,6 @@ function App() {
       const fallbackText = parsedSegments.slice(0, 3).map(s => s.originalText).join(" ");
       setGlobalContext(fallbackText);
       setContextDraft(fallbackText);
-      setIsContextApproved(false);
 
       // Trigger AI Analysis in background if API key exists
       const apiKey = config.geminiKey || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
@@ -221,6 +244,7 @@ function App() {
       // Find if userStyle is a custom style
       const customStyle = customStyles.find(s => s.id === userStyle);
       
+      // Pass the locked master context to ensure exact consistency across all batches
       const newResults = await generateBrollPlan(
         targetSegments, 
         config.geminiKey, 
@@ -229,7 +253,7 @@ function App() {
         aspectRatio,
         resolution,
         customStyle,
-        globalContext // Pass the anchor here
+        globalContext
       );
       
       // Merge new results with existing ones
@@ -250,8 +274,15 @@ function App() {
       const nextEnd = Math.min(nextStart + PAGE_SIZE, segments.length);
       setGenRange({ start: nextStart, end: nextEnd });
 
-      // Save to History
-      saveSession(LOCAL_USER.email, currentFileName, segments, mergedSuggestions);
+      // Save to History with preserved context
+      saveSession(
+        LOCAL_USER.email, 
+        currentFileName, 
+        segments, 
+        mergedSuggestions,
+        globalContext,
+        isContextApproved
+      );
       // Refresh history locally
       setHistory(getHistory(LOCAL_USER.email));
 
@@ -263,23 +294,14 @@ function App() {
   };
 
   const handleRegenerate = () => {
-      // Clears current suggestions and resets range to start over
+      // Clears current suggestions and resets range to start over, preserving approved context
       setSuggestions([]); 
       setGenRange({ start: 0, end: PAGE_SIZE });
-      // We don't call handleGenerate here because we want the user to click the button again 
-      // with potentially new settings, OR we can just trigger it.
-      // Let's trigger it for better UX.
   };
-
-  // Effect to handle the actual trigger of handleRegenerate if needed, 
-  // but better to just have a clean reset.
 
   const handleDeleteSession = (sessionId: string) => {
     const updatedHistory = deleteSession(LOCAL_USER.email, sessionId);
     setHistory(updatedHistory);
-    // If the currently viewed session is deleted, clear the view
-    // Note: We don't strictly have a 'currentSessionId' state, but we check if segments match.
-    // Simpler approach: Just keep current view, but next refresh it's gone from history.
   };
 
   const handleDownload = () => {
@@ -299,6 +321,13 @@ function App() {
       setSegments(session.segments);
       setSuggestions(session.suggestions);
       setCurrentFileName(session.scriptName);
+      if (session.globalContext) {
+        setGlobalContext(session.globalContext);
+        setContextDraft(session.globalContext);
+        const approved = session.isContextApproved ?? true;
+        setIsContextApproved(approved);
+        isContextApprovedRef.current = approved;
+      }
       setError(null);
       setIsMobileMenuOpen(false); 
   };
@@ -410,9 +439,19 @@ function App() {
 
             {/* Error Banner */}
             {error && (
-            <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg flex items-center gap-3 animate-fade-in text-sm md:text-base">
-                <AlertCircle className="w-5 h-5 shrink-0" />
-                {error}
+            <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in text-sm md:text-base">
+                <div className="flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <span>{error}</span>
+                </div>
+                {(error.includes("cuota") || error.includes("429") || error.includes("API Key") || error.includes("ajustes")) && (
+                    <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg shrink-0 transition-colors"
+                    >
+                        Configurar API Key
+                    </button>
+                )}
             </div>
             )}
 
@@ -420,27 +459,27 @@ function App() {
             {segments.length > 0 && (
                 <div className={`mb-6 transition-all duration-300 border rounded-xl animate-fade-in ${
                     isContextApproved 
-                    ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-900/30' 
+                    ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 shadow-sm' 
                     : 'bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/50'
                 }`}>
                     <div className="p-4">
                         <div className="flex items-start justify-between gap-4">
                             <div className="flex items-start gap-3 flex-1">
-                                <div className={`${isContextApproved ? 'bg-emerald-600' : 'bg-indigo-600'} p-1.5 rounded-lg text-white mt-0.5 shrink-0`}>
-                                    <Monitor className="w-4 h-4" />
+                                <div className={`${isContextApproved ? 'bg-emerald-600' : 'bg-indigo-600'} p-2 rounded-lg text-white mt-0.5 shrink-0 shadow-sm`}>
+                                    {isContextApproved ? <Lock className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
                                 </div>
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className={`text-xs font-bold uppercase tracking-wider ${isContextApproved ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
-                                            Ancla de Contexto Visual
+                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                        <h3 className={`text-xs font-bold uppercase tracking-wider ${isContextApproved ? 'text-emerald-700 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                            Tema Maestro del Guion (Contexto Transversal)
                                         </h3>
                                         {isContextApproved ? (
-                                            <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-                                                <Check className="w-3 h-3" /> APROBADO
+                                            <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-emerald-200 dark:border-emerald-800">
+                                                <Lock className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> FIJADO & PROTEGIDO
                                             </span>
                                         ) : (
-                                            <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-bold">
-                                                PENDIENTE DE REVISIÓN
+                                            <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                                                PENDIENTE DE APROBACIÓN
                                             </span>
                                         )}
                                     </div>
@@ -448,7 +487,7 @@ function App() {
                                     {isAnalyzingContext ? (
                                         <div className="flex items-center gap-2 py-2 text-indigo-600 dark:text-indigo-400 text-sm font-medium animate-pulse">
                                             <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                                            <span>Analizando tema maestro del guion con IA Gemini Pro...</span>
+                                            <span>Analizando tema maestro del guion con IA Gemini...</span>
                                         </div>
                                     ) : isEditingContext ? (
                                         <div className="mt-1">
@@ -460,15 +499,21 @@ function App() {
                                             />
                                         </div>
                                     ) : (
-                                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium leading-relaxed mt-0.5">
+                                        <p className="text-sm text-slate-800 dark:text-slate-200 font-medium leading-relaxed mt-0.5">
                                             "{globalContext || 'Sin contexto definido.'}"
                                         </p>
                                     )}
                                     
                                     {!isEditingContext && !isAnalyzingContext && (
-                                        <p className="text-[10px] text-slate-500 mt-1 italic">
-                                            Este contexto asegura que cada sugerencia visual mantenga la coherencia con el "tema maestro".
-                                        </p>
+                                        isContextApproved ? (
+                                            <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1.5 font-medium flex items-center gap-1">
+                                                <Check className="w-3.5 h-3.5" /> Este contexto está guardado y blindado: cada lote de 30 bloques lo utilizará transversalmente sin alterarlo.
+                                            </p>
+                                        ) : (
+                                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 italic">
+                                                Revisa o edita este tema maestro y pulsa "Aprobar" para bloquearlo antes de generar los bloques visuales.
+                                            </p>
+                                        )
                                     )}
                                 </div>
                             </div>
@@ -481,10 +526,11 @@ function App() {
                                                 setGlobalContext(contextDraft);
                                                 setIsEditingContext(false);
                                                 setIsContextApproved(true);
+                                                isContextApprovedRef.current = true;
                                             }}
-                                            className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-1"
+                                            className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                         >
-                                            <Check className="w-3.5 h-3.5" /> Guardar
+                                            <Check className="w-3.5 h-3.5" /> Guardar y Aprobar
                                         </button>
                                         <button 
                                             onClick={() => {
@@ -500,25 +546,27 @@ function App() {
                                     <div className="flex flex-col gap-1.5">
                                         {!isContextApproved && (
                                             <button 
-                                                onClick={() => setIsContextApproved(true)}
+                                                onClick={() => {
+                                                    setIsContextApproved(true);
+                                                    isContextApprovedRef.current = true;
+                                                }}
                                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                             >
-                                                <Check className="w-3.5 h-3.5" /> Aprobar
+                                                <Check className="w-3.5 h-3.5" /> Aprobar Tema
                                             </button>
                                         )}
                                         <button 
                                             onClick={() => {
                                                 setIsEditingContext(true);
                                                 setContextDraft(globalContext);
-                                                setIsContextApproved(false);
                                             }}
                                             className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                         >
                                             <Sparkles className="w-3 h-3 text-indigo-500" />
-                                            {isContextApproved ? 'Ajustar' : 'Editar'}
+                                            {isContextApproved ? 'Modificar Tema' : 'Editar'}
                                         </button>
 
-                                        {!isAnalyzingContext && (
+                                        {!isAnalyzingContext && !isContextApproved && (
                                             <button 
                                                 onClick={() => analyzeContextWithAI()}
                                                 title="Volver a analizar con IA"
@@ -534,9 +582,9 @@ function App() {
                         
                         {!isContextApproved && !isEditingContext && !isAnalyzingContext && (
                             <div className="mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-900/50 flex items-center gap-2">
-                                <AlertCircle className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                                    Confirma el contexto antes de generar para mejores resultados.
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                                    Por favor aprueba el tema maestro para asegurar máxima rigurosidad y evitar que cambie durante la generación.
                                 </p>
                             </div>
                         )}
@@ -793,7 +841,7 @@ function App() {
         <div className="fixed bottom-4 right-4 z-50">
             <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                v2.4 - Pro Context + Flash Batches
+                v2.5 - Flash Safe + Context Lock + Strict Rigor
             </div>
         </div>
       </div>

@@ -77,4 +77,6 @@ export interface HistorySession {
   scriptName: string;
   segments: ScriptSegment[];
   suggestions: BrollSuggestion[];
+  globalContext?: string;
+  isContextApproved?: boolean;
 }
