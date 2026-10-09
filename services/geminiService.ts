@@ -2,7 +2,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types";
 
 // Resilient pool of high-capacity models with automatic failover
-// gemini-2.5-flash has the largest dedicated server allocation globally and rarely suffers 503 spikes
 export const AVAILABLE_MODELS = [
   "gemini-2.5-flash",
   "gemini-flash-latest",
@@ -108,7 +107,10 @@ ${fullText.substring(0, 8000)}
  * Helper to synthesize visual search keywords if a segment is ever missing from AI output.
  * NEVER returns raw script monologue/narration.
  */
-const synthesizeVisualFallback = (text: string, masterContext: string): { mainQuery: string; ytQuery: string; intent: string } => {
+const synthesizeVisualFallback = (
+  text: string, 
+  masterContext: string
+): { mainQuery: string; ytQuery: string; stockQuery: string; intent: string } => {
   const stopWords = new Set([
     'el','la','los','las','un','una','unos','unas','de','del','a','en','para','por','con','sin','sobre',
     'como','cuando','donde','porque','que','y','o','pero','si','no','mas','su','sus','se','le','les','lo',
@@ -130,11 +132,12 @@ const synthesizeVisualFallback = (text: string, masterContext: string): { mainQu
     .slice(0, 4)
     .join(' ') || 'documental b-roll';
 
-  const mainQuery = `${masterSubject} ${cleanWords || 'archivo metraje cinematografico'}`.trim();
-  const ytQuery = `${masterSubject} b-roll metraje historico`.trim();
-  const intent = `Toma cinematográfica representativa vinculada a ${masterSubject}`;
+  const mainQuery = `${masterSubject} ${cleanWords || 'metraje historico'}`.trim();
+  const ytQuery = `${masterSubject} ${cleanWords || 'documental'} archivo metraje video`.trim();
+  const stockQuery = `${cleanWords || 'cinematic b-roll footage'}`.trim();
+  const intent = `Toma cinematográfica representativa vinculada a ${masterSubject}: ${cleanWords}`;
 
-  return { mainQuery, ytQuery, intent };
+  return { mainQuery, ytQuery, stockQuery, intent };
 };
 
 export const generateBrollPlan = async (
@@ -150,8 +153,8 @@ export const generateBrollPlan = async (
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey });
 
-  // Chunk size: 10 segments provides optimal balance between payload size, token latency, and RPM consumption.
-  const CHUNK_SIZE = 10;
+  // Chunk size: 8-10 segments provides optimal balance between payload size, token latency, and RPM consumption.
+  const CHUNK_SIZE = 8;
   const chunkedSegments: ScriptSegment[][] = [];
   for (let i = 0; i < segments.length; i += CHUNK_SIZE) {
     chunkedSegments.push(segments.slice(i, i + CHUNK_SIZE));
@@ -162,7 +165,7 @@ export const generateBrollPlan = async (
   // Anchor strictly to the provided master context. Never allow it to be empty.
   const finalContext = (providedContext && providedContext.trim().length > 0)
     ? providedContext.trim()
-    : "Documental con metraje cinematográfico de alta calidad y archivo contextual.";
+    : "Documental temático con metraje cinematográfico de alta calidad y archivo contextual.";
 
   // Candidate models pool with auto-rotation
   const modelsPool = preferredModel && preferredModel !== "Auto"
@@ -170,6 +173,38 @@ export const generateBrollPlan = async (
     : AVAILABLE_MODELS;
 
   let currentModelIndex = 0;
+
+  // Build the explicit style directive block
+  let styleDirective = "";
+  if (customStyle) {
+    styleDirective = `
+======================================================================
+*** ESTILO VISUAL PERSONALIZADO ACTIVO (OBLIGATORIO Y PRIORITARIO) ***
+Nombre del Estilo Creado por el Usuario: "${customStyle.name}"
+Instrucción Maestra de Estilo del Usuario:
+"""
+${customStyle.instruction}
+"""
+
+REGLAS ABSOLUTAS PARA EL ESTILO PERSONALIZADO:
+1. El campo 'aiPrompt' DEBE incorporar obligatoriamente la técnica, medio artístico (óleo, acuarela, 35mm, animación, render 3D, cómic, etc.), paleta de color, texturas e iluminación detalladas en la instrucción anterior.
+2. Si la instrucción del usuario contiene marcadores o variables como [INSERTA AQUÍ LA DESCRIPCIÓN], [DESCRIPCIÓN], [ESCENA], [SCENE] o similar, DEBES sustituir ese marcador exactamente con la escena narrativa lógica correspondiente a ese bloque del guion, manteniendo la fórmula intacta del estilo.
+3. Si no contiene marcadores explícitos, aplica toda la técnica y estética descrita en la instrucción a la escena concreta del bloque.
+4. JAMÁS descartes el estilo del usuario ni lo reemplaces por fórmulas genéricas ("Cinematic photorealistic 35mm") si la instrucción pide otro tipo de arte.
+======================================================================`;
+  } else if (userStyle && userStyle !== "Auto-Detect") {
+    styleDirective = `
+======================================================================
+*** ESTILO VISUAL SELECCIONADO: "${userStyle}" ***
+- El campo 'aiPrompt' debe reflejar fielmente la estética, óptica, tratamiento visual, textura e iluminación propios de "${userStyle}".
+======================================================================`;
+  } else {
+    styleDirective = `
+======================================================================
+*** ESTILO VISUAL ***
+- Estilo documental cinematográfico de alta gama, adaptado coherentemente al tono del guion.
+======================================================================`;
+  }
 
   for (let i = 0; i < chunkedSegments.length; i++) {
     const chunk = chunkedSegments[i];
@@ -180,45 +215,61 @@ export const generateBrollPlan = async (
       : "";
 
     const prompt = `
-CRITICAL INSTRUCTION: Generate high-rigor visual search queries and B-Roll specifications.
+CRITICAL DIRECTIVE: Genera especificaciones de B-Roll de máxima rigurosidad y prompts visuales narrativos lógicos para cada bloque de este guion.
 
-MASTER CONTEXT & SUBJECT (IMMUTABLE ANCHOR):
+TEMA MAESTRO Y CONTEXTO GENERAL DEL GUION:
 "${finalContext}"
 
-${prevContext ? `PREVIOUS NARRATIVE CONTEXT (CONTINUITY): "${prevContext}"` : ""}
+${prevContext ? `CONTINUIDAD NARRATIVA ANTERIOR: "${prevContext}"` : ""}
 
-USER VISUAL PARAMETERS:
-- Requested Style: ${customStyle ? customStyle.instruction : userStyle}
-- Narrative Tone: ${userTone}
-- Aspect Ratio: ${aspectRatio}
-- Target Resolution: ${resolution}
+PARÁMETROS VISUALES:
+${styleDirective}
+- Tono Narrativo: ${userTone}
+- Relación de Aspecto: ${aspectRatio}
+- Resolución Objetivo: ${resolution}
 
-INPUT SCRIPT SEGMENTS TO PROCESS (KEEP "segmentId" EXACTLY AS PROVIDED):
+BLOQUES DEL GUION A PROCESAR (MANTÉN "segmentId" EXACTAMENTE IGUAL):
 ${JSON.stringify(chunk.map(s => ({ segmentId: s.id, narrationText: s.originalText })))}
     `;
 
-    const systemInstruction = `Eres un Director de Fotografía, Investigador Visual y Editor de B-Roll de primer nivel para producciones documentales y cinematográficas.
+    const systemInstruction = `Eres un Director de Fotografía, Documentalista e Investigador de Archivo Visual de nivel internacional.
 
-REGLAS DE ORO PARA LA RIGUROSIDAD:
-1. PROHIBICIÓN TOTAL DE COPIAR EL TEXTO NARRATIVO:
-   - JAMÁS copies ni repitas la frase de locución/guion en 'mainQuery' o 'youtubeQuery'.
-   - El guion es audio oral/narración; las queries son TÉRMINOS VISUALES CONCRETOS para motores de búsqueda de stock (Pexels, Unsplash, Google Images, Pinterest, YouTube).
-   - INACEPTABLE: "Y cuando finalmente todo parecía derrumbarse a su alrededor"
-   - RIGUROSO Y CORRECTO: "[Sujeto del Tema Maestro] edificio antiguo en ruinas plano general dramático atardecer"
+REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
 
-2. ANCLAJE OBLIGATORIO AL TEMA MAESTRO:
-   - Cada 'mainQuery' DEBE incluir el sujeto o entidad principal del Tema Maestro.
-   - Formato exacto de 'mainQuery': [Sujeto específico del Tema Maestro] + [Acción física o elemento visual visible en pantalla] + [Entorno, iluminación o tipo de plano] (3 a 6 palabras clave visuales, directas).
-   - Formato de 'youtubeQuery': Términos específicos para encontrar metraje real, entrevistas o archivo histórico: "[Sujeto del Tema Maestro] [archivo historico / metraje b-roll documental 4k]".
+1. PROHIBICIÓN TOTAL DE BÚSQUEDAS GENÉRICAS O REPETITIVAS:
+   - Cada bloque del guion relata un momento, personaje, acción, herramienta, lugar, objeto, documento o situación específica.
+   - Las búsquedas ('mainQuery', 'youtubeQuery', 'stockQuery') NO DEBEN SER GENÉRICAS ni idénticas entre bloques.
+   - PROHIBIDO usar plantillas clonadas como "[Sujeto] metraje cinematográfico plano general" o "[Sujeto] archivo historico documental 4k" para todos los bloques.
+   - Cada búsqueda debe identificar los SUSTANTIVOS, ACCIONES Y ELEMENTOS VISUALES ESPECÍFICOS de ese bloque concreto en relación con el tema maestro.
+   - JAMÁS copies ni repitas la frase textual de la narración/locución: el guion es audio oral; las queries son TÉRMINOS VISUALES DIRECTOS para motores de búsqueda.
 
-3. INTENCIÓN VISUAL (visualIntent):
-   - Describe con precisión técnica cinematográfica lo que ve el espectador en pantalla (ej. "Plano detalle de documentos antiguos bajo luz tenue lateral", "Plano cenital en cámara lenta de multitud").
+2. 'mainQuery' (Para Google Images y Pinterest):
+   - Términos de búsqueda directos y precisos en español (o con nombres propios/técnicos históricos/científicos).
+   - Combina el sujeto/entidad del tema maestro con el elemento, acción u objeto tangible que ocurre en ESTE bloque.
+   - Diseñado para que al hacer clic en Google o Pinterest aparezcan fotos, referencias o documentos reales y específicos de esa escena.
+   - Sin palabras de relleno vacías (prohibido poner "plano general", "alta calidad", "4k"). Usa sustantivos y descriptores reales.
+   - Ejemplo: si el bloque habla de "Turing y el equipo descifrando la máquina Enigma en la cabaña 8 de Bletchley Park", 'mainQuery': "Alan Turing maquina Enigma Bletchley Park cabaña 8 descifrado".
 
-4. PROMPT PARA IA (aiPrompt):
-   - Prompt fotográfico en inglés para Midjourney/Imagen (ej. "Cinematic 4K shot of [Master Subject], [action/scene], dramatic lighting, 35mm lens, photorealistic, ${aspectRatio}").
+3. 'youtubeQuery' (Para YouTube):
+   - Términos específicos para encontrar vídeos reales, entrevistas, documentales temáticos, archivo histórico o metraje en movimiento del tema de ESTE bloque.
+   - Debe variar en cada bloque según el suceso narrado.
+   - Ejemplo: "Alan Turing descifrado Enigma Bletchley Park documental archivo historico" o "maquina Enigma funcionamiento documental".
 
-5. FORMATO DE SALIDA:
-   - Devuelve un array JSON que coincida exactamente con el esquema especificado para cada segmento.`;
+4. 'stockQuery' (Para Pexels y Unsplash en INGLÉS):
+   - 2 a 5 palabras clave en INGLÉS que describan los elementos físicos y visuales visibles en pantalla (objetos, entorno, personas, acciones).
+   - Pexels y Unsplash indexan en inglés. Proporcionar estas palabras clave en inglés garantiza que los enlaces devuelvan vídeos y fotos reales de stock de altísima calidad que coincidan exactamente con la escena.
+   - Ejemplo: "vintage cryptography machine code breaker laboratory 1940s".
+
+5. REGLAS ESTRICTAS PARA 'aiPrompt' (PROMPT PARA IA GENERATIVA):
+   - APLICACIÓN OBLIGATORIA DEL ESTILO: Si se proporcionó un estilo personalizado o seleccionado, el prompt DEBE tomar obligatoriamente la técnica artística, medio (acuarela, óleo, 35mm film, anime, render 3D, cyberpunk, etc.), paleta de color y estética dictadas por el usuario. Si la instrucción del usuario tiene un marcador como [INSERTA AQUÍ LA DESCRIPCIÓN], rellena ese marcador con la escena concreta del bloque y mantén la estructura del estilo.
+   - CERO ABSTRACCIÓN — NARRATIVA LÓGICA Y COHERENTE CON EL GUION:
+     - PROHIBIDO generar conceptos abstractos, figuras etéreas, orbes luminosos flotantes, metáforas vacías o escenas surrealistas sin sentido.
+     - El prompt DEBE representar una escena LÓGICA, FÍSICA y TANGIBLE que le dé sentido visual exacto a lo que se relata en este bloque del guion.
+     - Debe ilustrar la acción, personajes, objetos y entorno físico real que el narrador está describiendo, de modo que el espectador entienda visualmente la narración.
+     - Debe estar en inglés (para Midjourney, Imagen, Flux, DALL-E) y terminar con los parámetros técnicos de aspecto: "--ar ${aspectRatio}".
+
+6. 'visualIntent':
+   - En español. Descripción clara y cinematográfica para el editor de vídeo de lo que debe verse en pantalla para ilustrar este fragmento del guion.`;
 
     let attempts = 0;
     const maxAttempts = 5;
@@ -247,9 +298,10 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
                     type: Type.OBJECT,
                     properties: {
                       mainQuery: { type: Type.STRING },
-                      youtubeQuery: { type: Type.STRING }
+                      youtubeQuery: { type: Type.STRING },
+                      stockQuery: { type: Type.STRING }
                     },
-                    required: ["mainQuery", "youtubeQuery"]
+                    required: ["mainQuery", "youtubeQuery", "stockQuery"]
                   },
                   aiPrompt: { type: Type.STRING }
                 },
@@ -286,27 +338,25 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
                            errMsg.includes("rate limit") ||
                            err.status === 429;
 
-        // CRITICAL AUTO-FAILOVER:
-        // If 503 high demand or overloaded, immediately switch to the next model in the pool!
+        // Auto-failover on 503
         if (is503HighDemand) {
           currentModelIndex++;
           const nextModel = modelsPool[currentModelIndex % modelsPool.length];
-          console.warn(`[Auto-Failover] Modelo ${activeModel} en alta demanda (503). Conmutando inmediatamente al modelo alternativo: ${nextModel}...`);
-          // Brief pause before trying alternative model
+          console.warn(`[Auto-Failover] Modelo ${activeModel} en alta demanda (503). Conmutando al modelo: ${nextModel}...`);
           await delay(1500);
           continue;
         }
 
-        // On quota 429, wait with progressive backoff and try next model
+        // Auto-failover on 429
         if (isQuota429) {
           currentModelIndex++;
-          const pauseTime = Math.min(5000 * attempts, 20000);
-          console.warn(`[Quota 429] Límite por minuto alcanzado. Pausando ${pauseTime}ms y conmutando modelo...`);
+          const pauseTime = Math.min(4000 * attempts, 16000);
+          console.warn(`[Quota 429] Límite por minuto. Pausando ${pauseTime}ms y probando siguiente modelo...`);
           await delay(pauseTime);
           continue;
         }
 
-        // Other errors: standard backoff
+        // Standard backoff
         const pauseTime = 2000 * attempts;
         console.warn(`Lote ${i + 1}/${chunkedSegments.length} intento ${attempts} falló (${errMsg}). Reintentando en ${pauseTime}ms...`);
         await delay(pauseTime);
@@ -319,30 +369,49 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
     }
   }
 
+  // Active style label for display in suggestion cards
+  const displayStyleName = customStyle ? customStyle.name : (userStyle !== "Auto-Detect" ? userStyle : "Cinematográfico");
+
   // Map results back to original segments with rigorous visual guarantees
   return segments.map(segment => {
     const found = allRawData.find(r => String(r.segmentId) === String(segment.id));
     
-    // Synthesize fallback visual query if anything is missing - NEVER fall back to literal raw narrator text
+    // Synthesize fallback visual query if anything was missing
     const fallback = synthesizeVisualFallback(segment.originalText, finalContext);
 
     let mainQuery = found?.searchQuery?.mainQuery?.trim() || fallback.mainQuery;
     let ytQuery = found?.searchQuery?.youtubeQuery?.trim() || fallback.ytQuery;
+    let stockQuery = found?.searchQuery?.stockQuery?.trim() || fallback.stockQuery;
 
-    // Safety check: if the AI returned the literal original text or something suspiciously identical to the dialogue
-    if (mainQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || 
-        mainQuery.length > 90) {
+    // Safety checks: only discard if the model literally pasted the whole raw script text
+    if (mainQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || mainQuery.length > 250) {
       mainQuery = fallback.mainQuery;
     }
 
-    if (ytQuery.toLowerCase() === segment.originalText.toLowerCase().trim() ||
-        ytQuery.length > 90) {
+    if (ytQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || ytQuery.length > 250) {
       ytQuery = fallback.ytQuery;
     }
 
     const visualIntent = found?.visualIntent || fallback.intent;
     const mediaType = (found?.mediaType === "IMAGE" ? MediaType.IMAGE : MediaType.VIDEO);
-    const aiPrompt = found?.aiPrompt || `Cinematic shot representing ${mainQuery}, 4K, photorealistic, ${aspectRatio}`;
+    
+    // Build fallback prompt adhering to style if missing
+    let defaultPrompt = `Detailed cinematic shot depicting ${mainQuery}, narrative lighting, sharp focus, ${aspectRatio}`;
+    if (customStyle) {
+      if (customStyle.instruction.includes("[INSERTA AQUÍ LA DESCRIPCIÓN]") || customStyle.instruction.includes("[DESCRIPCIÓN]")) {
+        defaultPrompt = customStyle.instruction
+          .replace(/\[INSERTA AQUÍ LA DESCRIPCIÓN\]/gi, mainQuery)
+          .replace(/\[DESCRIPCIÓN\]/gi, mainQuery);
+      } else {
+        defaultPrompt = `${customStyle.instruction}, scene: ${mainQuery}, --ar ${aspectRatio}`;
+      }
+    }
+    const aiPrompt = found?.aiPrompt || defaultPrompt;
+
+    // Use English stockQuery for stock platforms (Pexels, Unsplash) to ensure rich, non-empty results
+    const stockSearch = encodeURIComponent(stockQuery || mainQuery);
+    const mainSearch = encodeURIComponent(mainQuery);
+    const ytSearch = encodeURIComponent(ytQuery);
 
     return {
       segmentId: segment.id,
@@ -351,19 +420,23 @@ REGLAS DE ORO PARA LA RIGUROSIDAD:
       searchQuery: {
         mainQuery,
         youtubeQuery: ytQuery,
+        stockQuery,
         variants: [],
         keywords: [
-          ...mainQuery.split(/\s+/).filter(w => w.length > 3).slice(0, 4)
+          ...mainQuery.split(/\s+/).filter(w => w.length > 3).slice(0, 5)
         ]
       },
-      styleParams: { mood: userTone, style: userStyle },
+      styleParams: { 
+        mood: userTone, 
+        style: displayStyleName 
+      },
       aiPrompt,
       sources: {
-        googleImages: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(mainQuery)}`,
-        pexels: `https://www.pexels.com/search/videos/${encodeURIComponent(mainQuery)}`,
-        unsplash: `https://unsplash.com/s/photos/${encodeURIComponent(mainQuery)}`,
-        pinterest: `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(mainQuery)}`,
-        youtube: `https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}`
+        googleImages: `https://www.google.com/search?tbm=isch&q=${mainSearch}`,
+        pexels: `https://www.pexels.com/search/videos/${stockSearch}`,
+        unsplash: `https://unsplash.com/s/photos/${stockSearch}`,
+        pinterest: `https://www.pinterest.com/search/pins/?q=${mainSearch}`,
+        youtube: `https://www.youtube.com/results?search_query=${ytSearch}`
       }
     } as BrollSuggestion;
   });

@@ -34,9 +34,16 @@ export const downloadLocalFile = (
       content += `**[${sug.mediaType}]** ${sug.visualIntent}\n`;
       content += `*Style:* ${sug.styleParams.style} | *Mood:* ${sug.styleParams.mood}\n\n`;
       content += `**Search Query:** \`${sug.searchQuery.mainQuery}\`\n`;
+      if (sug.searchQuery.youtubeQuery) {
+        content += `**YouTube Query:** \`${sug.searchQuery.youtubeQuery}\`\n`;
+      }
+      if (sug.searchQuery.stockQuery) {
+        content += `**Stock Keywords:** \`${sug.searchQuery.stockQuery}\`\n`;
+      }
       content += `**Keywords:** ${sug.searchQuery.keywords.join(', ')}\n\n`;
       content += `**Direct Links:**\n`;
       content += `- [Google Images](${sug.sources.googleImages})\n`;
+      content += `- [YouTube](${sug.sources.youtube})\n`;
       content += `- [Pexels](${sug.sources.pexels})\n`;
       content += `- [Unsplash](${sug.sources.unsplash})\n`;
       content += `- [Pinterest](${sug.sources.pinterest})\n`;

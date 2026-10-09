@@ -246,14 +246,15 @@ function App() {
       // Determine which segments to process
       const targetSegments = segments.slice(genRange.start, genRange.end);
       
-      // Find if userStyle is a custom style
-      const customStyle = customStyles.find(s => s.id === userStyle);
+      // Find if userStyle is a custom style (matched by id or name)
+      const customStyle = customStyles.find(s => s.id === userStyle || s.name === userStyle);
+      const effectiveStyleName = customStyle ? customStyle.name : userStyle;
       
       // Pass the locked master context to ensure exact consistency across all batches
       const newResults = await generateBrollPlan(
         targetSegments, 
         config.geminiKey, 
-        customStyle ? "Custom" : userStyle, 
+        effectiveStyleName, 
         userTone,
         aspectRatio,
         resolution,
@@ -854,7 +855,7 @@ function App() {
         <div className="fixed bottom-4 right-4 z-50">
             <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                v2.5 - Flash Safe + Context Lock + Strict Rigor
+                v2.6 - Rigorous Context Links + Custom Style Directives + Logical Narrative Prompts
             </div>
         </div>
       </div>

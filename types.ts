@@ -19,6 +19,7 @@ export interface ScriptSegment {
 export interface SearchQuery {
   mainQuery: string;
   youtubeQuery: string; // Specific query optimized for YouTube search
+  stockQuery?: string; // English visual keywords optimized for Pexels and Unsplash stock search
   variants: string[];
   keywords: string[];
 }

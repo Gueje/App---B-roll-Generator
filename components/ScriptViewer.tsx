@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScriptSegment, BrollSuggestion, MediaType } from '../types';
-import { Video, Image as ImageIcon, Wand2, StickyNote, ExternalLink, Youtube, Download } from 'lucide-react';
+import { Video, Image as ImageIcon, Wand2, StickyNote, ExternalLink, Youtube, Download, Copy, Check, Film, Search } from 'lucide-react';
 
 interface Props {
   segments: ScriptSegment[];
@@ -8,6 +8,16 @@ interface Props {
 }
 
 const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyPrompt = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => {
+      setCopiedId(null);
+    }, 2000);
+  };
+
   return (
     <div className="space-y-6">
       {segments.map((segment) => {
@@ -43,7 +53,7 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
               {suggestion ? (
                 <>
                   <div className="flex justify-between items-start mb-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${
                         suggestion.mediaType === MediaType.VIDEO 
                             ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' 
@@ -52,33 +62,62 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                         {suggestion.mediaType === MediaType.VIDEO ? <Video className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
                         {suggestion.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGEN'}
                       </span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 px-2 py-1 rounded">
-                        Estilo: {suggestion.styleParams.style}
+                      <span className="text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 px-2 py-1 rounded">
+                        🎨 {suggestion.styleParams.style}
                       </span>
+                      {suggestion.styleParams.mood && suggestion.styleParams.mood !== "Auto-Detect" && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 px-2 py-1 rounded">
+                          Tono: {suggestion.styleParams.mood}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <h3 className="font-medium text-lg text-slate-900 dark:text-white mb-2">
+                  <h3 className="font-medium text-lg text-slate-900 dark:text-white mb-2 leading-snug">
                     {suggestion.visualIntent}
                   </h3>
 
-                  <div className="bg-slate-100 dark:bg-slate-700/50 rounded p-3 mb-4">
-                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold mb-1">Búsqueda Rigurosa (Query)</p>
-                     <p className="text-slate-800 dark:text-slate-200 font-mono text-sm mb-2">{suggestion.searchQuery.mainQuery}</p>
+                  <div className="bg-slate-100 dark:bg-slate-700/50 rounded-lg p-3.5 mb-4 space-y-2">
+                     <div>
+                       <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          <Search className="w-3 h-3 text-indigo-500" /> Búsqueda Visual Específica (Google / Pinterest)
+                       </div>
+                       <p className="text-slate-900 dark:text-slate-100 font-mono text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-600 select-all">
+                         {suggestion.searchQuery.mainQuery}
+                       </p>
+                     </div>
                      
-                     {/* YouTube specific query display */}
+                     {/* YouTube specific query */}
                      {suggestion.searchQuery.youtubeQuery && (
-                       <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 border-t border-slate-200 dark:border-slate-600 pt-2 mb-2">
-                          <Youtube className="w-3 h-3" />
-                          <span className="font-mono">{suggestion.searchQuery.youtubeQuery}</span>
+                       <div>
+                          <div className="flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mb-1">
+                             <Youtube className="w-3 h-3" /> Búsqueda en YouTube (Metraje / Archivo / B-Roll)
+                          </div>
+                          <p className="text-slate-900 dark:text-slate-100 font-mono text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-600 select-all">
+                             {suggestion.searchQuery.youtubeQuery}
+                          </p>
                        </div>
                      )}
 
-                     <div className="flex flex-wrap gap-2">
-                        {suggestion.searchQuery.keywords.slice(0, 5).map(k => (
-                          <span key={k} className="text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">#{k}</span>
-                        ))}
-                     </div>
+                     {/* Stock Query (English for Pexels / Unsplash) */}
+                     {suggestion.searchQuery.stockQuery && (
+                       <div>
+                          <div className="flex items-center gap-1 text-[11px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-wider mb-1">
+                             <Film className="w-3 h-3" /> Stock Keywords (Pexels / Unsplash)
+                          </div>
+                          <p className="text-slate-900 dark:text-slate-100 font-mono text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-200 dark:border-slate-600 select-all">
+                             {suggestion.searchQuery.stockQuery}
+                          </p>
+                       </div>
+                     )}
+
+                     {suggestion.searchQuery.keywords.length > 0 && (
+                       <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-200 dark:border-slate-600">
+                          {suggestion.searchQuery.keywords.slice(0, 5).map(k => (
+                            <span key={k} className="text-[11px] bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">#{k}</span>
+                          ))}
+                       </div>
+                     )}
                   </div>
 
                   <div className="mt-auto space-y-4">
@@ -111,23 +150,24 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
                     )}
 
                     <div>
-                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Buscar en Stock & Video</p>
+                        <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Enlaces Directos a Recursos</p>
                         <div className="flex flex-wrap gap-2">
-                            <a href={suggestion.sources.googleImages} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-3 py-2 rounded-lg transition-colors">
-                                <img src="https://www.google.com/favicon.ico" className="w-3 h-3" alt="Google" />
-                                Google
+                            <a href={suggestion.sources.googleImages} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 px-3 py-2 rounded-lg transition-colors font-medium shadow-xs">
+                                <img src="https://www.google.com/favicon.ico" className="w-3.5 h-3.5" alt="Google" />
+                                Google Images
                             </a>
-                            <a href={suggestion.sources.youtube} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#FF0000] hover:bg-[#cc0000] text-white px-3 py-2 rounded-lg transition-colors">
-                                <Youtube className="w-3 h-3" />
+                            <a href={suggestion.sources.youtube} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs bg-[#FF0000] hover:bg-[#cc0000] text-white px-3 py-2 rounded-lg transition-colors font-medium shadow-xs">
+                                <Youtube className="w-3.5 h-3.5" />
                                 YouTube
                             </a>
-                            <a href={suggestion.sources.pexels} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#05a081] hover:bg-[#048a6f] text-white px-3 py-2 rounded-lg transition-colors">
+                            <a href={suggestion.sources.pexels} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs bg-[#05a081] hover:bg-[#048a6f] text-white px-3 py-2 rounded-lg transition-colors font-medium shadow-xs">
+                                <Film className="w-3.5 h-3.5" />
                                 Pexels
                             </a>
-                            <a href={suggestion.sources.unsplash} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-black hover:bg-slate-800 dark:bg-slate-900 dark:border dark:border-slate-700 text-white px-3 py-2 rounded-lg transition-colors">
+                            <a href={suggestion.sources.unsplash} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs bg-black hover:bg-slate-800 dark:bg-slate-900 dark:border dark:border-slate-700 text-white px-3 py-2 rounded-lg transition-colors font-medium shadow-xs">
                                 Unsplash
                             </a>
-                            <a href={suggestion.sources.pinterest} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-[#E60023] hover:bg-[#bd081c] text-white px-3 py-2 rounded-lg transition-colors">
+                            <a href={suggestion.sources.pinterest} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs bg-[#E60023] hover:bg-[#bd081c] text-white px-3 py-2 rounded-lg transition-colors font-medium shadow-xs">
                                 Pinterest
                             </a>
                         </div>
@@ -136,10 +176,31 @@ const ScriptViewer: React.FC<Props> = ({ segments, suggestions }) => {
 
                   {suggestion.aiPrompt && (
                     <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                         <div className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 font-bold mb-1">
-                             <Wand2 className="w-3 h-3" /> Prompt para IA Generativa
+                         <div className="flex items-center justify-between gap-2 mb-2">
+                             <div className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider">
+                                 <Wand2 className="w-3.5 h-3.5" /> Prompt para IA Generativa (Estilo Aplicado)
+                             </div>
+                             <button
+                               onClick={() => handleCopyPrompt(segment.id, suggestion.aiPrompt || '')}
+                               className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-medium transition-colors"
+                               title="Copiar prompt para Midjourney / Imagen / Flux"
+                             >
+                               {copiedId === segment.id ? (
+                                 <>
+                                   <Check className="w-3 h-3 text-emerald-600" />
+                                   <span>¡Copiado!</span>
+                                 </>
+                               ) : (
+                                 <>
+                                   <Copy className="w-3 h-3" />
+                                   <span>Copiar Prompt</span>
+                                 </>
+                               )}
+                             </button>
                          </div>
-                         <p className="text-xs text-slate-600 dark:text-slate-400 italic">"{suggestion.aiPrompt}"</p>
+                         <p className="text-xs text-slate-700 dark:text-slate-300 font-mono bg-slate-50 dark:bg-slate-900/60 p-3 rounded-lg border border-slate-200 dark:border-slate-700 leading-relaxed select-all">
+                           {suggestion.aiPrompt}
+                         </p>
                     </div>
                   )}
                 </>
