@@ -1,12 +1,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ScriptSegment, BrollSuggestion, MediaType, CustomStyle } from "../types";
 
-// Resilient pool of high-capacity models with automatic failover
+// Resilient pool of high-capacity models with automatic failover across separate quota buckets
 export const AVAILABLE_MODELS = [
   "gemini-2.5-flash",
+  "gemini-3.1-flash-lite",
   "gemini-flash-latest",
-  "gemini-3.8-flash",
-  "gemini-3.1-flash-lite"
+  "gemini-3.8-flash"
 ];
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -149,23 +149,92 @@ export const generateBrollPlan = async (
   resolution: string = "4k",
   customStyle?: CustomStyle,
   providedContext?: string,
-  preferredModel?: string
+  preferredModel?: string,
+  onChunkComplete?: (chunkSuggestions: BrollSuggestion[]) => void
 ): Promise<BrollSuggestion[]> => {
   const ai = new GoogleGenAI({ apiKey });
 
-  // Chunk size: 8-10 segments provides optimal balance between payload size, token latency, and RPM consumption.
-  const CHUNK_SIZE = 8;
+  // Chunk size: 15 segments halves RPM consumption (30 blocks = only 2 API requests)
+  const CHUNK_SIZE = 15;
   const chunkedSegments: ScriptSegment[][] = [];
   for (let i = 0; i < segments.length; i += CHUNK_SIZE) {
     chunkedSegments.push(segments.slice(i, i + CHUNK_SIZE));
   }
 
-  const allRawData: any[] = [];
+  const allSuggestions: BrollSuggestion[] = [];
   
   // Anchor strictly to the provided master context. Never allow it to be empty.
   const finalContext = (providedContext && providedContext.trim().length > 0)
     ? providedContext.trim()
     : "Documental temático con metraje cinematográfico de alta calidad y archivo contextual.";
+
+  // Active style label for display in suggestion cards
+  const displayStyleName = customStyle ? customStyle.name : (userStyle !== "Auto-Detect" ? userStyle : "Cinematográfico");
+
+  const mapChunkResults = (chunkSegs: ScriptSegment[], rawData: any[]): BrollSuggestion[] => {
+    return chunkSegs.map(segment => {
+      const found = rawData.find(r => String(r.segmentId) === String(segment.id));
+      const fallback = synthesizeVisualFallback(segment.originalText, finalContext);
+
+      let mainQuery = found?.searchQuery?.mainQuery?.trim() || fallback.mainQuery;
+      let ytQuery = found?.searchQuery?.youtubeQuery?.trim() || fallback.ytQuery;
+      let stockQuery = found?.searchQuery?.stockQuery?.trim() || fallback.stockQuery;
+
+      if (mainQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || mainQuery.length > 250) {
+        mainQuery = fallback.mainQuery;
+      }
+
+      if (ytQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || ytQuery.length > 250) {
+        ytQuery = fallback.ytQuery;
+      }
+
+      const visualIntent = found?.visualIntent || fallback.intent;
+      const mediaType = (found?.mediaType === "IMAGE" ? MediaType.IMAGE : MediaType.VIDEO);
+
+      let defaultPrompt = `Detailed cinematic shot depicting ${mainQuery}, narrative lighting, sharp focus, ${aspectRatio}`;
+      if (customStyle) {
+        if (customStyle.instruction.includes("[INSERTA AQUÍ LA DESCRIPCIÓN]") || customStyle.instruction.includes("[DESCRIPCIÓN]")) {
+          defaultPrompt = customStyle.instruction
+            .replace(/\[INSERTA AQUÍ LA DESCRIPCIÓN\]/gi, mainQuery)
+            .replace(/\[DESCRIPCIÓN\]/gi, mainQuery);
+        } else {
+          defaultPrompt = `${customStyle.instruction}, scene: ${mainQuery}, --ar ${aspectRatio}`;
+        }
+      }
+      const aiPrompt = found?.aiPrompt || defaultPrompt;
+
+      const stockSearch = encodeURIComponent(stockQuery || mainQuery);
+      const mainSearch = encodeURIComponent(mainQuery);
+      const ytSearch = encodeURIComponent(ytQuery);
+
+      return {
+        segmentId: segment.id,
+        visualIntent,
+        mediaType,
+        searchQuery: {
+          mainQuery,
+          youtubeQuery: ytQuery,
+          stockQuery,
+          variants: [],
+          keywords: [
+            ...mainQuery.split(/\s+/).filter((w: string) => w.length > 3).slice(0, 5)
+          ]
+        },
+        styleParams: {
+          mood: userTone,
+          style: displayStyleName
+        },
+        aiPrompt,
+        sources: {
+          googleImages: `https://www.google.com/search?tbm=isch&q=${mainSearch}`,
+          pexels: `https://www.pexels.com/search/videos/${stockSearch}`,
+          unsplash: `https://unsplash.com/s/photos/${stockSearch}`,
+          pinterest: `https://www.pinterest.com/search/pins/?q=${mainSearch}`,
+          youtube: `https://www.youtube.com/results?search_query=${ytSearch}`
+        }
+      } as BrollSuggestion;
+    });
+  };
 
   // Candidate models pool with auto-rotation
   const modelsPool = preferredModel && preferredModel !== "Auto"
@@ -272,7 +341,7 @@ REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
    - En español. Descripción clara y cinematográfica para el editor de vídeo de lo que debe verse en pantalla para ilustrar este fragmento del guion.`;
 
     let attempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 6;
     let success = false;
     let lastError: any = null;
 
@@ -315,17 +384,26 @@ REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
         if (!text) throw new Error("Respuesta vacía de la IA.");
         const data = JSON.parse(text);
         if (Array.isArray(data)) {
-          allRawData.push(...data);
+          const chunkSuggestions = mapChunkResults(chunk, data);
+          allSuggestions.push(...chunkSuggestions);
+          // Notify caller immediately so progress is saved locally after EVERY chunk
+          if (onChunkComplete) {
+            onChunkComplete(chunkSuggestions);
+          }
           success = true;
-          // Pacing delay between successful chunks
+          // Pacing delay between successful chunks to respect RPM limits
           if (i < chunkedSegments.length - 1) {
-            await delay(1200);
+            await delay(1800);
           }
         }
       } catch (err: any) {
         attempts++;
         lastError = err;
         const errMsg = String(err.message || "");
+
+        const is404NotFound = errMsg.includes("404") ||
+                              errMsg.includes("NOT_FOUND") ||
+                              errMsg.includes("not found");
         
         const is503HighDemand = errMsg.includes("503") || 
                                errMsg.includes("high demand") || 
@@ -338,6 +416,15 @@ REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
                            errMsg.includes("rate limit") ||
                            err.status === 429;
 
+        // Immediately skip unsupported/not-found models
+        if (is404NotFound) {
+          currentModelIndex++;
+          const nextModel = modelsPool[currentModelIndex % modelsPool.length];
+          console.warn(`[Auto-Failover] Modelo ${activeModel} no disponible (404). Cambiando inmediatamente a ${nextModel}...`);
+          await delay(300);
+          continue;
+        }
+
         // Auto-failover on 503
         if (is503HighDemand) {
           currentModelIndex++;
@@ -347,11 +434,12 @@ REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
           continue;
         }
 
-        // Auto-failover on 429
+        // Auto-failover on 429 across separate model quota buckets
         if (isQuota429) {
           currentModelIndex++;
-          const pauseTime = Math.min(4000 * attempts, 16000);
-          console.warn(`[Quota 429] Límite por minuto. Pausando ${pauseTime}ms y probando siguiente modelo...`);
+          const nextModel = modelsPool[currentModelIndex % modelsPool.length];
+          const pauseTime = attempts <= 2 ? 2500 : Math.min(5000 * (attempts - 1), 15000);
+          console.warn(`[Quota 429] Límite alcanzado en ${activeModel}. Conmutando a ${nextModel} en ${pauseTime}ms...`);
           await delay(pauseTime);
           continue;
         }
@@ -369,75 +457,5 @@ REGLAS FUNDAMENTALES DE RIGUROSIDAD Y ESPECIFICIDAD POR BLOQUE:
     }
   }
 
-  // Active style label for display in suggestion cards
-  const displayStyleName = customStyle ? customStyle.name : (userStyle !== "Auto-Detect" ? userStyle : "Cinematográfico");
-
-  // Map results back to original segments with rigorous visual guarantees
-  return segments.map(segment => {
-    const found = allRawData.find(r => String(r.segmentId) === String(segment.id));
-    
-    // Synthesize fallback visual query if anything was missing
-    const fallback = synthesizeVisualFallback(segment.originalText, finalContext);
-
-    let mainQuery = found?.searchQuery?.mainQuery?.trim() || fallback.mainQuery;
-    let ytQuery = found?.searchQuery?.youtubeQuery?.trim() || fallback.ytQuery;
-    let stockQuery = found?.searchQuery?.stockQuery?.trim() || fallback.stockQuery;
-
-    // Safety checks: only discard if the model literally pasted the whole raw script text
-    if (mainQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || mainQuery.length > 250) {
-      mainQuery = fallback.mainQuery;
-    }
-
-    if (ytQuery.toLowerCase() === segment.originalText.toLowerCase().trim() || ytQuery.length > 250) {
-      ytQuery = fallback.ytQuery;
-    }
-
-    const visualIntent = found?.visualIntent || fallback.intent;
-    const mediaType = (found?.mediaType === "IMAGE" ? MediaType.IMAGE : MediaType.VIDEO);
-    
-    // Build fallback prompt adhering to style if missing
-    let defaultPrompt = `Detailed cinematic shot depicting ${mainQuery}, narrative lighting, sharp focus, ${aspectRatio}`;
-    if (customStyle) {
-      if (customStyle.instruction.includes("[INSERTA AQUÍ LA DESCRIPCIÓN]") || customStyle.instruction.includes("[DESCRIPCIÓN]")) {
-        defaultPrompt = customStyle.instruction
-          .replace(/\[INSERTA AQUÍ LA DESCRIPCIÓN\]/gi, mainQuery)
-          .replace(/\[DESCRIPCIÓN\]/gi, mainQuery);
-      } else {
-        defaultPrompt = `${customStyle.instruction}, scene: ${mainQuery}, --ar ${aspectRatio}`;
-      }
-    }
-    const aiPrompt = found?.aiPrompt || defaultPrompt;
-
-    // Use English stockQuery for stock platforms (Pexels, Unsplash) to ensure rich, non-empty results
-    const stockSearch = encodeURIComponent(stockQuery || mainQuery);
-    const mainSearch = encodeURIComponent(mainQuery);
-    const ytSearch = encodeURIComponent(ytQuery);
-
-    return {
-      segmentId: segment.id,
-      visualIntent,
-      mediaType,
-      searchQuery: {
-        mainQuery,
-        youtubeQuery: ytQuery,
-        stockQuery,
-        variants: [],
-        keywords: [
-          ...mainQuery.split(/\s+/).filter(w => w.length > 3).slice(0, 5)
-        ]
-      },
-      styleParams: { 
-        mood: userTone, 
-        style: displayStyleName 
-      },
-      aiPrompt,
-      sources: {
-        googleImages: `https://www.google.com/search?tbm=isch&q=${mainSearch}`,
-        pexels: `https://www.pexels.com/search/videos/${stockSearch}`,
-        unsplash: `https://unsplash.com/s/photos/${stockSearch}`,
-        pinterest: `https://www.pinterest.com/search/pins/?q=${mainSearch}`,
-        youtube: `https://www.youtube.com/results?search_query=${ytSearch}`
-      }
-    } as BrollSuggestion;
-  });
+  return allSuggestions;
 };

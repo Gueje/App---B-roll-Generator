@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-// Deploy Version: 2.5.0 - Strict Subject Rigor, Context Lock & Flash Model Quota Protection
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw, Lock } from 'lucide-react';
+// Deploy Version: 2.7.0 - Bulletproof Local Persistence + Incremental Chunk Auto-Save + Resume on 429
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw, Lock, HardDrive } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -10,7 +10,7 @@ import { parseDocx } from './services/docxService';
 import { parsePdf } from './services/pdfService';
 import { generateBrollPlan, getGlobalContext, cleanErrorMessage } from './services/geminiService';
 import { downloadLocalFile } from './services/exportService';
-import { saveSession, getHistory, deleteSession } from './services/historyService';
+import { upsertSession, getHistory, getHistoryAsync, deleteSession, getActiveSessionId, setActiveSessionId } from './services/historyService';
 import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
 const INITIAL_CONFIG: AppConfig = {
@@ -68,17 +68,85 @@ function App() {
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("4k");
 
+  // Active project tracking & auto-save state
+  const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const [lastSavedLabel, setLastSavedLabel] = useState<string | null>(null);
+
   const [status, setStatus] = useState<'IDLE' | 'PARSING' | 'GENERATING' | 'EXPORTING'>('IDLE');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Incremental generation state
-  const [genRange, setGenRange] = useState({ start: 0, end: 30 });
   const PAGE_SIZE = 30;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Persistence
+  // Derived pending segments (never lose progress or re-generate already saved blocks)
+  const coveredSegmentIds = new Set(suggestions.map(s => s.segmentId));
+  const pendingSegments = segments.filter(s => !coveredSegmentIds.has(s.id));
+  const nextBatchSegments = pendingSegments.slice(0, PAGE_SIZE);
+
+  // Helper to persist current project state immediately in place
+  const persistProject = (overrides?: Partial<{
+    id: string;
+    scriptName: string;
+    segments: ScriptSegment[];
+    suggestions: BrollSuggestion[];
+    globalContext: string;
+    isContextApproved: boolean;
+    userStyle: string;
+    userTone: string;
+    aspectRatio: string;
+    resolution: string;
+  }>) => {
+    const segsToSave = overrides?.segments ?? segments;
+    if (segsToSave.length === 0) return;
+
+    const targetId = overrides?.id ?? activeSessionIdRef.current ?? crypto.randomUUID();
+    activeSessionIdRef.current = targetId;
+    setActiveSessionIdState(targetId);
+
+    upsertSession({
+      id: targetId,
+      userEmail: LOCAL_USER.email,
+      scriptName: overrides?.scriptName ?? currentFileName,
+      segments: segsToSave,
+      suggestions: overrides?.suggestions ?? suggestions,
+      globalContext: overrides?.globalContext ?? globalContext,
+      isContextApproved: overrides?.isContextApproved ?? isContextApprovedRef.current,
+      userStyle: overrides?.userStyle ?? userStyle,
+      userTone: overrides?.userTone ?? userTone,
+      aspectRatio: overrides?.aspectRatio ?? aspectRatio,
+      resolution: overrides?.resolution ?? resolution,
+    });
+
+    setHistory(getHistory(LOCAL_USER.email));
+    const now = new Date();
+    setLastSavedLabel(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  };
+
+  const applySessionToWorkspace = (session: HistorySession) => {
+    activeSessionIdRef.current = session.id;
+    setActiveSessionIdState(session.id);
+    setActiveSessionId(LOCAL_USER.email, session.id);
+    setSegments(session.segments || []);
+    setSuggestions(session.suggestions || []);
+    setCurrentFileName(session.scriptName || '');
+
+    const ctx = session.globalContext || '';
+    setGlobalContext(ctx);
+    setContextDraft(ctx);
+    const approved = Boolean(session.isContextApproved);
+    setIsContextApproved(approved);
+    isContextApprovedRef.current = approved;
+
+    if (session.userStyle) setUserStyle(session.userStyle);
+    if (session.userTone) setUserTone(session.userTone);
+    if (session.aspectRatio) setAspectRatio(session.aspectRatio);
+    if (session.resolution) setResolution(session.resolution);
+  };
+
+  // Persistence for API config & styles
   useEffect(() => {
     localStorage.setItem('br_geminiKey', config.geminiKey);
     if (config.preferredModel) {
@@ -101,13 +169,45 @@ function App() {
     }
   }, [darkMode]);
 
-  // Load History on Mount
+  // Load History & Auto-Restore Active Workspace on Mount
   useEffect(() => {
-    const loadedHistory = getHistory(LOCAL_USER.email);
-    setHistory(loadedHistory);
+    const localHistory = getHistory(LOCAL_USER.email);
+    setHistory(localHistory);
+
+    const savedActiveId = getActiveSessionId(LOCAL_USER.email);
+    if (savedActiveId) {
+      const activeSess = localHistory.find(h => h.id === savedActiveId);
+      if (activeSess && activeSess.segments?.length > 0) {
+        applySessionToWorkspace(activeSess);
+      }
+    }
+
+    // Also hydrate from IndexedDB in case a large script exceeded localStorage quota
+    getHistoryAsync(LOCAL_USER.email).then((fullHistory) => {
+      if (fullHistory.length > 0) {
+        setHistory(fullHistory);
+        if (savedActiveId) {
+          const idbActive = fullHistory.find(h => h.id === savedActiveId);
+          if (idbActive && idbActive.segments?.length > 0) {
+            // Restore if not restored yet or if IDB has more saved suggestions
+            setSegments(prev => (prev.length === 0 ? idbActive.segments : prev));
+            setSuggestions(prev =>
+              (idbActive.suggestions?.length || 0) > prev.length ? idbActive.suggestions : prev
+            );
+            if (!activeSessionIdRef.current) {
+              applySessionToWorkspace(idbActive);
+            }
+          }
+        }
+      }
+    });
   }, []);
 
-  const analyzeContextWithAI = async (keyToUse?: string, currentSegments?: ScriptSegment[]) => {
+  const analyzeContextWithAI = async (
+    keyToUse?: string,
+    currentSegments?: ScriptSegment[],
+    sessionOverrides?: { id: string; scriptName: string }
+  ) => {
     const targetSegs = currentSegments || segments;
     if (targetSegs.length === 0) return;
 
@@ -141,6 +241,12 @@ function App() {
       if (analysisRunId.current === currentRunId && !isContextApprovedRef.current) {
         setGlobalContext(context);
         setContextDraft(context);
+        persistProject({
+          id: sessionOverrides?.id,
+          scriptName: sessionOverrides?.scriptName,
+          segments: targetSegs,
+          globalContext: context,
+        });
       }
     } catch (err: any) {
       console.error("Error al analizar contexto con IA:", err);
@@ -171,12 +277,16 @@ function App() {
       return;
     }
 
+    const cleanName = file.name.replace(/\.(docx|pdf)$/, '');
+    const newSessionId = crypto.randomUUID();
+
     setStatus('PARSING');
     setError(null);
     setSegments([]);
     setSuggestions([]);
-    setGenRange({ start: 0, end: PAGE_SIZE });
-    setCurrentFileName(file.name.replace(/\.(docx|pdf)$/, ''));
+    setCurrentFileName(cleanName);
+    activeSessionIdRef.current = newSessionId;
+    setActiveSessionIdState(newSessionId);
     
     // Reset context approvals for the new file
     analysisRunId.current += 1;
@@ -206,10 +316,20 @@ function App() {
       setGlobalContext(fallbackText);
       setContextDraft(fallbackText);
 
+      // Immediately persist the newly uploaded script locally so refreshing never loses it
+      persistProject({
+        id: newSessionId,
+        scriptName: cleanName,
+        segments: parsedSegments,
+        suggestions: [],
+        globalContext: fallbackText,
+        isContextApproved: false,
+      });
+
       // Trigger AI Analysis in background if API key exists
       const apiKey = config.geminiKey || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
       if (apiKey) {
-        analyzeContextWithAI(apiKey, parsedSegments);
+        analyzeContextWithAI(apiKey, parsedSegments, { id: newSessionId, scriptName: cleanName });
       }
     } catch (err: any) {
       setError(err.message || "Error al leer el archivo");
@@ -239,20 +359,21 @@ function App() {
         return;
     }
 
+    if (nextBatchSegments.length === 0) return;
+
     setStatus('GENERATING');
     setError(null);
 
+    // Track live progress across chunks so partial batches are ALWAYS saved locally
+    let liveSuggestions = [...suggestions];
+    let savedInThisRun = 0;
+
     try {
-      // Determine which segments to process
-      const targetSegments = segments.slice(genRange.start, genRange.end);
-      
-      // Find if userStyle is a custom style (matched by id or name)
       const customStyle = customStyles.find(s => s.id === userStyle || s.name === userStyle);
       const effectiveStyleName = customStyle ? customStyle.name : userStyle;
       
-      // Pass the locked master context to ensure exact consistency across all batches
-      const newResults = await generateBrollPlan(
-        targetSegments, 
+      await generateBrollPlan(
+        nextBatchSegments, 
         config.geminiKey, 
         effectiveStyleName, 
         userTone,
@@ -260,55 +381,47 @@ function App() {
         resolution,
         customStyle,
         globalContext,
-        config.preferredModel
-      );
-      
-      // Merge new results with existing ones
-      const mergedSuggestions = [...suggestions];
-      newResults.forEach(newSug => {
-        const index = mergedSuggestions.findIndex(s => s.segmentId === newSug.segmentId);
-        if (index !== -1) {
-          mergedSuggestions[index] = newSug;
-        } else {
-          mergedSuggestions.push(newSug);
+        config.preferredModel,
+        (chunkSuggestions) => {
+          chunkSuggestions.forEach(newSug => {
+            const index = liveSuggestions.findIndex(s => s.segmentId === newSug.segmentId);
+            if (index !== -1) {
+              liveSuggestions[index] = newSug;
+            } else {
+              liveSuggestions.push(newSug);
+            }
+          });
+          savedInThisRun += chunkSuggestions.length;
+          const updatedList = [...liveSuggestions];
+          setSuggestions(updatedList);
+          persistProject({ suggestions: updatedList });
         }
-      });
-
-      setSuggestions(mergedSuggestions);
-      
-      // Update Range for next batch
-      const nextStart = genRange.end;
-      const nextEnd = Math.min(nextStart + PAGE_SIZE, segments.length);
-      setGenRange({ start: nextStart, end: nextEnd });
-
-      // Save to History with preserved context
-      saveSession(
-        LOCAL_USER.email, 
-        currentFileName, 
-        segments, 
-        mergedSuggestions,
-        globalContext,
-        isContextApproved
       );
-      // Refresh history locally
-      setHistory(getHistory(LOCAL_USER.email));
 
     } catch (err: any) {
-      setError(cleanErrorMessage(err));
+      const baseMsg = cleanErrorMessage(err);
+      if (savedInThisRun > 0) {
+        setError(`Se guardaron localmente ${savedInThisRun} bloques antes de la pausa. ${baseMsg}`);
+      } else {
+        setError(baseMsg);
+      }
     } finally {
       setStatus('IDLE');
     }
   };
 
   const handleRegenerate = () => {
-      // Clears current suggestions and resets range to start over, preserving approved context
-      setSuggestions([]); 
-      setGenRange({ start: 0, end: PAGE_SIZE });
+      // Clears current suggestions to start over, preserving approved context & updating local storage
+      setSuggestions([]);
+      persistProject({ suggestions: [] });
   };
 
   const handleDeleteSession = (sessionId: string) => {
     const updatedHistory = deleteSession(LOCAL_USER.email, sessionId);
     setHistory(updatedHistory);
+    if (sessionId === activeSessionIdRef.current) {
+      handleNewProject();
+    }
   };
 
   const handleDownload = () => {
@@ -325,28 +438,23 @@ function App() {
   };
 
   const handleSelectHistory = (session: HistorySession) => {
-      setSegments(session.segments);
-      setSuggestions(session.suggestions);
-      setCurrentFileName(session.scriptName);
-      if (session.globalContext) {
-        setGlobalContext(session.globalContext);
-        setContextDraft(session.globalContext);
-        const approved = session.isContextApproved ?? true;
-        setIsContextApproved(approved);
-        isContextApprovedRef.current = approved;
-      }
+      applySessionToWorkspace(session);
       setError(null);
       setIsMobileMenuOpen(false); 
   };
 
   const handleNewProject = () => {
+    activeSessionIdRef.current = null;
+    setActiveSessionIdState(null);
+    setActiveSessionId(LOCAL_USER.email, null);
     setSegments([]);
     setSuggestions([]);
-    setGenRange({ start: 0, end: PAGE_SIZE });
     setCurrentFileName('');
     setGlobalContext('');
     setIsContextApproved(false);
+    isContextApprovedRef.current = false;
     setIsEditingContext(false);
+    setLastSavedLabel(null);
     setStatus('IDLE');
     setError(null);
     // Reset options to default
@@ -364,6 +472,7 @@ function App() {
       <Sidebar 
         user={LOCAL_USER} 
         history={history} 
+        activeSessionId={activeSessionId}
         onSelectSession={handleSelectHistory}
         onDeleteSession={handleDeleteSession}
         isOpen={isMobileMenuOpen}
@@ -541,6 +650,10 @@ function App() {
                                                 setIsEditingContext(false);
                                                 setIsContextApproved(true);
                                                 isContextApprovedRef.current = true;
+                                                persistProject({
+                                                  globalContext: contextDraft,
+                                                  isContextApproved: true
+                                                });
                                             }}
                                             className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                         >
@@ -563,6 +676,7 @@ function App() {
                                                 onClick={() => {
                                                     setIsContextApproved(true);
                                                     isContextApprovedRef.current = true;
+                                                    persistProject({ isContextApproved: true });
                                                 }}
                                                 className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-1"
                                             >
@@ -682,9 +796,13 @@ function App() {
                     
                     {/* Top Row: Info + Action Buttons */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm md:text-base">
+                        <div className="flex items-center gap-2.5 flex-wrap text-slate-600 dark:text-slate-300 text-sm md:text-base">
                             <FileText className="w-4 h-4 md:w-5 md:h-5" />
                             <span className="font-semibold">Configuración de Generación</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                                <HardDrive className="w-3 h-3" />
+                                {lastSavedLabel ? `Guardado en local (${lastSavedLabel})` : "Auto-guardado local activo"}
+                            </span>
                         </div>
                         
                         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
@@ -703,19 +821,19 @@ function App() {
                             )}
                             <button
                                 onClick={handleGenerate}
-                                disabled={status !== 'IDLE' || suggestions.length >= segments.length}
+                                disabled={status !== 'IDLE' || pendingSegments.length === 0}
                                 className={`w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium flex justify-center items-center gap-2 transition-colors text-sm md:text-base ${
-                                    suggestions.length >= segments.length 
+                                    pendingSegments.length === 0 
                                     ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 cursor-default' 
                                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-100 dark:shadow-none'
                                 }`}
                             >
                             {status === 'GENERATING' ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /> Analizando...</>
-                            ) : suggestions.length >= segments.length ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Generando y guardando...</>
+                            ) : pendingSegments.length === 0 ? (
                                 "Visuales Completados"
                             ) : suggestions.length > 0 ? (
-                                `Generar Siguientes (${genRange.start + 1} - ${genRange.end})`
+                                `Generar Siguientes (${nextBatchSegments[0].order + 1} - ${nextBatchSegments[nextBatchSegments.length - 1].order + 1})`
                             ) : (
                                 segments.length > PAGE_SIZE ? `Generar Primeros ${PAGE_SIZE}` : "Generar Visuales"
                             )}
@@ -736,16 +854,22 @@ function App() {
 
                     {/* Progress Indicator */}
                     {suggestions.length > 0 && (
-                        <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden mb-2">
-                            <div 
-                                className="bg-indigo-600 h-full transition-all duration-500" 
-                                style={{ width: `${(suggestions.length / segments.length) * 100}%` }}
-                            />
+                        <div className="space-y-1 mb-2">
+                            <div className="flex justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                <span>Progreso guardado: {suggestions.length} de {segments.length} bloques</span>
+                                <span>{Math.round((suggestions.length / segments.length) * 100)}%</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                                <div 
+                                    className="bg-indigo-600 h-full transition-all duration-500" 
+                                    style={{ width: `${(suggestions.length / segments.length) * 100}%` }}
+                                />
+                            </div>
                         </div>
                     )}
                     
-                    {/* Advanced Options Row (Visible when not generated yet, or when user wants to see settings) */}
-                    {suggestions.length < segments.length && (
+                    {/* Advanced Options Row (Visible when pending segments remain) */}
+                    {pendingSegments.length > 0 && (
                         <div className="pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 flex items-center gap-1">
@@ -753,7 +877,11 @@ function App() {
                                 </label>
                                 <select 
                                     value={userStyle}
-                                    onChange={(e) => setUserStyle(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setUserStyle(val);
+                                        persistProject({ userStyle: val });
+                                    }}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <optgroup label="Básicos">
@@ -781,7 +909,11 @@ function App() {
                                 </label>
                                 <select 
                                     value={userTone}
-                                    onChange={(e) => setUserTone(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setUserTone(val);
+                                        persistProject({ userTone: val });
+                                    }}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <option value="Auto-Detect">✨ Auto-Detect (IA Decision)</option>
@@ -799,11 +931,18 @@ function App() {
                                 </label>
                                 <select 
                                     value={aspectRatio}
-                                    onChange={(e) => setAspectRatio(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setAspectRatio(val);
+                                        persistProject({ aspectRatio: val });
+                                    }}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <option value="16:9">16:9 (Horizontal)</option>
                                     <option value="9:16">9:16 (Vertical)</option>
+                                    <option value="1:1">1:1 (Cuadrado)</option>
+                                    <option value="4:3">4:3 (Clásico)</option>
+                                    <option value="21:9">21:9 (Cinematográfico)</option>
                                 </select>
                             </div>
                             <div>
@@ -812,7 +951,11 @@ function App() {
                                 </label>
                                 <select 
                                     value={resolution}
-                                    onChange={(e) => setResolution(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setResolution(val);
+                                        persistProject({ resolution: val });
+                                    }}
                                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-2 text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <option value="2k">2k</option>
@@ -848,6 +991,7 @@ function App() {
             onSave={(newStyle) => {
                 setCustomStyles([...customStyles, newStyle]);
                 setUserStyle(newStyle.id); // Automatically select the new style
+                persistProject({ userStyle: newStyle.id });
             }}
         />
 
@@ -855,7 +999,7 @@ function App() {
         <div className="fixed bottom-4 right-4 z-50">
             <div className="bg-slate-800/80 backdrop-blur-sm text-[10px] text-slate-400 px-2 py-1 rounded-full border border-slate-700 font-mono flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                v2.6 - Rigorous Context Links + Custom Style Directives + Logical Narrative Prompts
+                v2.7 - Auto-Guardado Local + IndexedDB + Reanudación 429
             </div>
         </div>
       </div>

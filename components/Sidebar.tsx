@@ -1,17 +1,18 @@
 import React from 'react';
 import { HistorySession, UserProfile } from '../types';
-import { History, Clock, FileVideo, User, X, Trash2 } from 'lucide-react';
+import { History, Clock, FileVideo, User, X, Trash2, CheckCircle2 } from 'lucide-react';
 
 interface Props {
   user: UserProfile;
   history: HistorySession[];
+  activeSessionId?: string | null;
   onSelectSession: (session: HistorySession) => void;
   onDeleteSession: (sessionId: string) => void;
   isOpen: boolean;       
   onClose: () => void;   
 }
 
-const Sidebar: React.FC<Props> = ({ user, history, onSelectSession, onDeleteSession, isOpen, onClose }) => {
+const Sidebar: React.FC<Props> = ({ user, history, activeSessionId, onSelectSession, onDeleteSession, isOpen, onClose }) => {
   // Mobile Overlay Classes
   const mobileClasses = `fixed inset-0 z-50 bg-slate-900 dark:bg-slate-950 transform transition-transform duration-300 ease-in-out ${
     isOpen ? 'translate-x-0' : '-translate-x-full'
@@ -53,7 +54,7 @@ const Sidebar: React.FC<Props> = ({ user, history, onSelectSession, onDeleteSess
               <p className="text-base font-bold text-white truncate">{user.name}</p>
               <p className="text-xs text-slate-400 truncate flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                Sesión Activa
+                Guardado Local Activo
               </p>
             </div>
           </div>
@@ -71,50 +72,71 @@ const Sidebar: React.FC<Props> = ({ user, history, onSelectSession, onDeleteSess
               </div>
           ) : (
               <div className="space-y-3">
-                  {history.map(session => (
-                      <div
-                          key={session.id}
-                          className="group relative w-full text-left p-4 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-all border border-transparent hover:border-slate-700"
-                      >
-                          <div 
-                            className="cursor-pointer"
-                            onClick={() => {
-                                onSelectSession(session);
-                                onClose(); 
-                            }}
-                          >
-                            <div className="flex items-center gap-3 text-indigo-300 mb-2">
-                                <FileVideo className="w-4 h-4 shrink-0" />
-                                <span className="text-sm font-bold truncate w-[140px]">{session.scriptName}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <Clock className="w-3 h-3" />
-                                {new Date(session.date).toLocaleDateString()}
-                            </div>
-                          </div>
+                  {history.map(session => {
+                      const totalSegs = session.segments?.length || 0;
+                      const genCount = session.suggestions?.length || 0;
+                      const isComplete = totalSegs > 0 && genCount >= totalSegs;
+                      const isActive = activeSessionId === session.id;
 
-                          <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if(window.confirm('¿Estás seguro de que quieres eliminar este proyecto?')) {
-                                    onDeleteSession(session.id);
-                                }
-                            }}
-                            className="absolute top-3 right-3 p-2 text-slate-600 hover:text-red-400 hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                            title="Eliminar proyecto"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                      </div>
-                  ))}
+                      return (
+                        <div
+                            key={session.id}
+                            className={`group relative w-full text-left p-4 rounded-xl transition-all border ${
+                              isActive 
+                                ? 'bg-indigo-950/70 border-indigo-500/60 shadow-md shadow-indigo-950/50' 
+                                : 'bg-slate-800/50 hover:bg-slate-800 border-transparent hover:border-slate-700'
+                            }`}
+                        >
+                            <div 
+                              className="cursor-pointer pr-6"
+                              onClick={() => {
+                                  onSelectSession(session);
+                                  onClose(); 
+                              }}
+                            >
+                              <div className="flex items-center gap-2.5 text-indigo-300 mb-1.5">
+                                  <FileVideo className="w-4 h-4 shrink-0" />
+                                  <span className="text-sm font-bold truncate">{session.scriptName}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {new Date(session.date).toLocaleDateString()}
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                    isComplete 
+                                      ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50' 
+                                      : 'bg-slate-700/70 text-slate-300'
+                                  }`}>
+                                    {isComplete && <CheckCircle2 className="w-2.5 h-2.5" />}
+                                    {genCount}/{totalSegs}
+                                  </span>
+                              </div>
+                            </div>
+
+                            <button 
+                              onClick={(e) => {
+                                  e.stopPropagation();
+                                  if(window.confirm('¿Estás seguro de que quieres eliminar este proyecto?')) {
+                                      onDeleteSession(session.id);
+                                  }
+                              }}
+                              className="absolute top-3 right-3 p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                              title="Eliminar proyecto"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                        </div>
+                      );
+                  })}
               </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 text-center text-xs text-slate-600 bg-slate-950">
-            <p>Generador de B-Roll v1.2</p>
-            <p className="opacity-50 mt-1">Modo Local Storage</p>
+        <div className="p-4 border-t border-slate-800 text-center text-xs text-slate-500 bg-slate-950">
+            <p className="font-medium text-slate-400">Generador de B-Roll</p>
+            <p className="opacity-70 mt-1">Auto-guardado Local + IndexedDB</p>
         </div>
       </div>
     </>

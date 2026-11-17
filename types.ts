@@ -81,4 +81,8 @@ export interface HistorySession {
   suggestions: BrollSuggestion[];
   globalContext?: string;
   isContextApproved?: boolean;
+  userStyle?: string;
+  userTone?: string;
+  aspectRatio?: string;
+  resolution?: string;
 }
