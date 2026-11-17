@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 // Deploy Version: 2.7.0 - Bulletproof Local Persistence + Incremental Chunk Auto-Save + Resume on 429
-import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw, Lock, HardDrive } from 'lucide-react';
+import { Upload, FileText, Settings, Loader2, PlayCircle, Download, AlertCircle, Plus, Menu, RotateCcw, Moon, Sun, Sliders, Palette, Monitor, Maximize, Check, Sparkles, RefreshCw, Lock, HardDrive, FileCode } from 'lucide-react';
 import SettingsModal from './components/SettingsModal';
 import ScriptViewer from './components/ScriptViewer';
 import Sidebar from './components/Sidebar';
@@ -9,7 +9,7 @@ import CustomStyleModal from './components/CustomStyleModal';
 import { parseDocx } from './services/docxService';
 import { parsePdf } from './services/pdfService';
 import { generateBrollPlan, getGlobalContext, cleanErrorMessage } from './services/geminiService';
-import { downloadLocalFile } from './services/exportService';
+import { downloadLocalFile, downloadHtmlFile } from './services/exportService';
 import { upsertSession, getHistory, getHistoryAsync, deleteSession, getActiveSessionId, setActiveSessionId } from './services/historyService';
 import { AppConfig, ScriptSegment, BrollSuggestion, UserProfile, HistorySession, CustomStyle } from './types';
 
@@ -427,12 +427,29 @@ function App() {
   const handleDownload = () => {
     setStatus('EXPORTING');
     try {
-      const docName = `B-Roll - ${currentFileName}`;
+      const docName = `B-Roll - ${currentFileName || 'Guion'}`;
       downloadLocalFile(docName, segments, suggestions);
-      setTimeout(() => setStatus('IDLE'), 1000);
+      setTimeout(() => setStatus('IDLE'), 800);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Error en descarga.");
+      setStatus('IDLE');
+    }
+  };
+
+  const handleDownloadHtml = () => {
+    setStatus('EXPORTING');
+    try {
+      const docName = `B-Roll - ${currentFileName || 'Guion'}`;
+      downloadHtmlFile(docName, segments, suggestions, {
+        globalContext,
+        isContextApproved,
+        darkMode,
+      });
+      setTimeout(() => setStatus('IDLE'), 800);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Error al exportar HTML.");
       setStatus('IDLE');
     }
   };
@@ -840,14 +857,26 @@ function App() {
                             </button>
 
                             {suggestions.length > 0 && (
-                            <button
-                                onClick={handleDownload}
-                                disabled={status === 'EXPORTING'}
-                                className="w-full sm:w-auto px-4 md:px-6 py-2.5 rounded-lg font-medium border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex justify-center items-center gap-2 text-sm md:text-base"
-                            >
-                                {status === 'EXPORTING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                Descargar (.md)
-                            </button>
+                            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                              <button
+                                  onClick={handleDownloadHtml}
+                                  disabled={status === 'EXPORTING'}
+                                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex justify-center items-center gap-2 text-sm md:text-base transition-colors"
+                                  title="Descargar reporte interactivo con diseño, estilos y botones"
+                              >
+                                  {status === 'EXPORTING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCode className="w-4 h-4" />}
+                                  Descargar (.html)
+                              </button>
+                              <button
+                                  onClick={handleDownload}
+                                  disabled={status === 'EXPORTING'}
+                                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg font-medium border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex justify-center items-center gap-2 text-sm md:text-base transition-colors"
+                                  title="Descargar versión texto plano en Markdown"
+                              >
+                                  {status === 'EXPORTING' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                  Descargar (.md)
+                              </button>
+                            </div>
                             )}
                         </div>
                     </div>
